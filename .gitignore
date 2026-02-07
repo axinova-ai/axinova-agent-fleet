@@ -1,0 +1,49 @@
+# Secrets
+*.enc.yaml
+secrets/
+.env
+.env.*
+
+# Age keys
+*.txt
+
+# SSH keys
+*.pem
+id_*
+known_hosts
+
+# WireGuard configs (contain private keys)
+wg0.conf
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# CI artifacts
+coverage.out
+*.test
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Docker
+docker-compose.override.yml
+
+# Go
+vendor/
+bin/
+dist/
+
+# Node.js
+node_modules/
+npm-debug.log

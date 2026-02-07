@@ -1,0 +1,31 @@
+# Axinova Agent Fleet - Mac Mini Toolchain
+
+# Core development tools
+brew "go"              # Go 1.24+
+brew "node"            # Node.js 22+
+brew "git"
+brew "gh"              # GitHub CLI
+brew "jq"              # JSON processing
+brew "yq"              # YAML processing
+
+# Container tooling
+cask "docker"          # Docker Desktop
+
+# Security & secrets
+brew "age"             # Encryption for SOPS
+brew "sops"            # Secrets management
+brew "1password-cli"   # 1Password CLI
+
+# Networking
+brew "wireguard-tools" # VPN to Singapore
+brew "mosh"            # Mobile shell for unstable connections
+
+# Go tooling
+# Note: These are installed via `go install` in setup script
+# - golang.org/x/vuln/cmd/govulncheck
+# - github.com/sqlc-dev/sqlc/cmd/sqlc
+# - github.com/golang-migrate/migrate/v4/cmd/migrate
+
+# Python (for AI experiments on Agent2)
+brew "python@3.12"
+brew "pipenv"
