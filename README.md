@@ -41,7 +41,23 @@ Specialized roles:
 
 **30-minute fast track:** [QUICKSTART.md](QUICKSTART.md)
 
-### 1. Bootstrap Mac Mini (15 min per mini)
+### 1. Setup VPN Server (Singapore)
+
+```bash
+# Add SSH config entry (already done if using this repo)
+# Entry for sg-vpn is in ~/.ssh/config
+
+# Run Ansible playbook to setup WireGuard server
+cd /Users/weixia/axinova/axinova-agent-fleet/ansible
+./scripts/setup-vpn.sh
+
+# Get server public key for client configuration
+ssh sg-vpn 'cat /etc/wireguard/keys/server_public.key'
+```
+
+See: [docs/vpn/CLIENT_SETUP.md](docs/vpn/CLIENT_SETUP.md) for detailed client setup.
+
+### 2. Bootstrap Mac Mini (15 min per mini)
 
 ```bash
 # SSH to Mac mini
@@ -49,6 +65,11 @@ ssh your-user@mac-mini.local
 
 # Run bootstrap (one command)
 curl -fsSL https://raw.githubusercontent.com/axinova-ai/axinova-agent-fleet/main/bootstrap/mac/setup-macos.sh | bash
+
+# Configure VPN connection
+cd ~/workspace/axinova-agent-fleet/bootstrap/vpn
+./wireguard-install.sh
+# Follow prompts to configure with server public key
 
 # Configure GitHub bot
 sudo -i -u axinova-agent
@@ -116,7 +137,8 @@ cd ~/workspace/axinova-agent-fleet
 
 - Bot tokens: Fine-grained GitHub PATs, stored in 1Password
 - Secrets: SOPS + age encryption
-- Network: WireGuard VPN to Singapore, Thunderbolt bridge between minis
+- Network: WireGuard VPN to Singapore (8.222.187.10), Thunderbolt bridge between minis
+- VPN Setup: Automated with Ansible (see `ansible/` directory)
 - Isolation: Dedicated `axinova-agent` user with restricted permissions
 
 ## Documentation
@@ -139,6 +161,7 @@ cd ~/workspace/axinova-agent-fleet
 
 ### Operations
 - **[Remote Access](docs/runbooks/remote-access.md)** - SSH, VPN, mosh, Thunderbolt
+- **[VPN Client Setup](docs/vpn/CLIENT_SETUP.md)** - WireGuard setup for Mac, Windows, Android
 - **[Rollback Procedures](docs/runbooks/rollback.md)** - Emergency rollback guide
 - **[Threat Model](docs/threat-model.md)** - Security analysis and mitigations
 

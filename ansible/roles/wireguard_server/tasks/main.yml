@@ -1,0 +1,109 @@
+---
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install required packages
+  apt:
+    name:
+      - wireguard
+      - wireguard-tools
+      - iptables
+      - ufw
+      - qrencode
+    state: present
+
+- name: Enable IP forwarding
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    sysctl_set: yes
+    state: present
+    reload: yes
+
+- name: Create WireGuard keys directory
+  file:
+    path: "{{ wireguard_keys_dir }}"
+    state: directory
+    mode: '0700'
+
+- name: Check if server private key exists
+  stat:
+    path: "{{ wireguard_keys_dir }}/server_private.key"
+  register: server_private_key_file
+
+- name: Generate server private key
+  shell: wg genkey
+  register: server_private_key_output
+  when: not server_private_key_file.stat.exists
+
+- name: Save server private key
+  copy:
+    content: "{{ server_private_key_output.stdout }}"
+    dest: "{{ wireguard_keys_dir }}/server_private.key"
+    mode: '0600'
+  when: not server_private_key_file.stat.exists
+
+- name: Read server private key
+  slurp:
+    src: "{{ wireguard_keys_dir }}/server_private.key"
+  register: server_private_key_slurp
+
+- name: Set server private key variable
+  set_fact:
+    server_private_key: "{{ server_private_key_slurp['content'] | b64decode | trim }}"
+
+- name: Generate server public key
+  shell: echo "{{ server_private_key }}" | wg pubkey
+  register: server_public_key_output
+  changed_when: false
+
+- name: Save server public key
+  copy:
+    content: "{{ server_public_key_output.stdout }}"
+    dest: "{{ wireguard_keys_dir }}/server_public.key"
+    mode: '0644'
+
+- name: Create WireGuard server configuration
+  template:
+    src: wg0.conf.j2
+    dest: "{{ wireguard_config }}"
+    mode: '0600'
+  notify: restart wireguard
+
+- name: Configure UFW - Allow SSH
+  ufw:
+    rule: allow
+    port: '22'
+    proto: tcp
+
+- name: Configure UFW - Allow WireGuard
+  ufw:
+    rule: allow
+    port: "{{ vpn_port }}"
+    proto: udp
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+    policy: deny
+
+- name: Enable WireGuard service
+  systemd:
+    name: wg-quick@wg0
+    enabled: yes
+    state: started
+
+- name: Display server public key
+  debug:
+    msg: |
+      ===================================================
+      WireGuard Server Setup Complete!
+      ===================================================
+      Server Public Key: {{ server_public_key_output.stdout }}
+      Server Endpoint: {{ ansible_host }}:{{ vpn_port }}
+      Server VPN IP: {{ vpn_server_ip }}
+
+      Use this public key when configuring clients.
+      ===================================================

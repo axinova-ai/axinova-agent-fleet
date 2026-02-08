@@ -1,0 +1,32 @@
+---
+# WireGuard Server Default Variables
+
+# Network configuration
+vpn_network: "10.66.66.0/24"
+vpn_server_ip: "10.66.66.1"
+vpn_port: 51820
+# DNS servers for clients
+vpn_dns: "1.1.1.1"
+# Server network interface (usually eth0 on cloud VMs)
+server_interface: "eth0"
+# WireGuard configuration directory
+wireguard_dir: "/etc/wireguard"
+wireguard_config: "{{ wireguard_dir }}/wg0.conf"
+wireguard_keys_dir: "{{ wireguard_dir }}/keys"
+client_ips:
+  m2_pro_agent_2: 10.66.66.2
+  m4_agent_1: 10.66.66.3
+  wei_iphone: 10.66.66.10
+  lisha_macbook_air: 10.66.66.11
+  wei_macbook_pro: 10.66.66.12
+  wei_hp_windows: 10.66.66.13
+  wei_android_xiaomi_ultra14: 10.66.66.14
+  lisha_iphone: 10.66.66.15
+m2_pro_agent_2_pubkey: WT+eS34Y6zDJhqCJUHZTTHvSJmocAMOOY7sNhfUTrx4=
+m4_agent_1_pubkey: /MqcCgjvBgGM7wPRH8dNgG4qi49oGZBnMiQq4ZdeYgk=
+wei_iphone_pubkey: JVI0Vbst1CRxxymJqwBbSQ4tcnAJCEvOKshwVJgmBhg=
+lisha_macbook_air_pubkey: cWXjFIzya3FQViZu8JPwzZjWeYrSMoURmbi7VSmg3zo=
+wei_macbook_pro_pubkey: 9Mw7aOAZ9lVszLymEgffQtNQr0c06XSqqbo3lXMKFw8=
+wei_hp_windows_pubkey: Q4AHdLhd5m+AECb0EmXLuBwc1UTwzaj/t7IVEtqQcks=
+wei_android_xiaomi_ultra14_pubkey: py3Y6EwUPlwbjsapRp1lgeFb3+B7eZ6EqDrpH9zCfig=
+lisha_iphone_pubkey: 2MmIot6priqSx7JQkvSucPUmESyxzHFu5aTazJCG3kM=

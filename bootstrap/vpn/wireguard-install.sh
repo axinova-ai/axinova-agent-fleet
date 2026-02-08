@@ -42,37 +42,40 @@ if [[ ! -f "$WG_CONFIG" ]]; then
   # Determine agent number based on hostname
   HOSTNAME=$(hostname -s)
   if [[ "$HOSTNAME" == *"m4"* ]]; then
-    CLIENT_IP="10.100.0.10"
+    CLIENT_IP="10.66.66.2"   # mac-mini-1
   elif [[ "$HOSTNAME" == *"m2"* ]]; then
-    CLIENT_IP="10.100.0.11"
+    CLIENT_IP="10.66.66.3"   # mac-mini-2
   else
-    CLIENT_IP="10.100.0.20"  # Laptop or other
+    CLIENT_IP="10.66.66.7"   # Laptop or other
   fi
 
   sudo tee "$WG_CONFIG" > /dev/null <<EOF
 [Interface]
 PrivateKey = $PRIVATE_KEY
 Address = $CLIENT_IP/24
+DNS = 1.1.1.1
 
 [Peer]
 PublicKey = <SERVER_PUBLIC_KEY>
-Endpoint = <ALIYUN_SG_PUBLIC_IP>:51820
-AllowedIPs = 10.100.0.0/24
+Endpoint = 8.222.187.10:51820
+AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
 
   echo "✅ Config created at $WG_CONFIG"
   echo ""
   echo "⚠️  Edit $WG_CONFIG and replace:"
-  echo "  - <SERVER_PUBLIC_KEY> with Aliyun SG server's public key"
-  echo "  - <ALIYUN_SG_PUBLIC_IP> with server's public IP"
+  echo "  - <SERVER_PUBLIC_KEY> with server's public key"
+  echo "    Get it with: ssh sg-vpn 'cat /etc/wireguard/keys/server_public.key'"
   echo ""
 else
   echo "→ WireGuard config already exists at $WG_CONFIG"
 fi
 
 echo "Next steps:"
-echo "1. Edit $WG_CONFIG with server details"
-echo "2. Connect: sudo wg-quick up wg0"
-echo "3. Verify: ping 10.100.0.1"
-echo "4. Auto-connect on boot: sudo brew services start wireguard-tools"
+echo "1. Get server public key: ssh sg-vpn 'cat /etc/wireguard/keys/server_public.key'"
+echo "2. Edit $WG_CONFIG and replace <SERVER_PUBLIC_KEY>"
+echo "3. Add this client's public key to server (see docs/vpn/CLIENT_SETUP.md)"
+echo "4. Connect: sudo wg-quick up wg0"
+echo "5. Verify: ping 10.66.66.1"
+echo "6. Auto-connect on boot: sudo brew services start wireguard-tools"

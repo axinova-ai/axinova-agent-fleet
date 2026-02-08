@@ -1,0 +1,54 @@
+---
+# VPN Client Inventory - Single Source of Truth
+# Run ansible/scripts/onboard-vpn-clients.sh to provision all clients
+
+clients:
+  - name: m2-pro-agent-2
+    device_type: macos
+    ip: 10.66.66.2
+    description: "M2 Pro Mac Mini - Agent 2"
+
+  - name: m4-agent-1
+    device_type: macos
+    ip: 10.66.66.3
+    description: "M4 Mac Mini - Agent 1"
+
+  - name: wei-iphone
+    device_type: ios
+    ip: 10.66.66.10
+    description: "Wei's iPhone"
+    generate_qr: true
+
+  - name: lisha-macbook-air
+    device_type: macos
+    ip: 10.66.66.11
+    description: "Lisha's MacBook Air"
+
+  - name: wei-macbook-pro
+    device_type: macos
+    ip: 10.66.66.12
+    description: "Wei's MacBook Pro"
+
+  - name: wei-hp-windows
+    device_type: windows
+    ip: 10.66.66.13
+    description: "Wei's HP Windows Laptop"
+
+  - name: wei-android-xiaomi-ultra14
+    device_type: android
+    ip: 10.66.66.14
+    description: "Wei's Xiaomi Ultra 14"
+    generate_qr: true
+
+  - name: lisha-iphone
+    device_type: ios
+    ip: 10.66.66.15
+    description: "Lisha's iPhone"
+    generate_qr: true
+
+# Server configuration (reference)
+server:
+  endpoint: "8.222.187.10:51820"
+  public_key: "4utg8R6pINVXmF0EilIQx2LAtndqO0plkv2kdEwf3QE="
+  vpn_network: "10.66.66.0/24"
+  dns: "1.1.1.1"

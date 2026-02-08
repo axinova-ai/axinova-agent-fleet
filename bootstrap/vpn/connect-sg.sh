@@ -26,8 +26,8 @@ echo ""
 echo "✅ Connected to VPN"
 echo ""
 echo "Verifying connectivity..."
-if ping -c 3 10.100.0.1 &>/dev/null; then
-  echo "✅ Can reach Aliyun SG server (10.100.0.1)"
+if ping -c 3 10.66.66.1 &>/dev/null; then
+  echo "✅ Can reach SG VPN server (10.66.66.1)"
 else
   echo "⚠️  Cannot reach server, check config"
 fi
