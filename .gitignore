@@ -24,6 +24,7 @@ ansible/roles/wireguard_server/defaults/main.yml.backup-*
 # VPN distribution directory (contains private keys and configs)
 vpn-distribution/*
 !vpn-distribution/README.md
+!vpn-distribution/STATUS.md
 
 # macOS
 .DS_Store
