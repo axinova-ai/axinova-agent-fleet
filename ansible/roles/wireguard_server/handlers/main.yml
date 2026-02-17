@@ -1,5 +1,5 @@
 ---
-- name: restart wireguard
+- name: restart amneziawg
   systemd:
-    name: wg-quick@wg0
+    name: awg-quick@awg0
     state: restarted

@@ -61,13 +61,13 @@ verify_server_reachable() {
     fi
 }
 
-verify_wireguard_running() {
-    log_info "Checking WireGuard service..."
+verify_amneziawg_running() {
+    log_info "Checking AmneziaWG service..."
 
-    if ssh "$SSH_HOST" 'sudo systemctl is-active wireguard-wg0' &>/dev/null; then
-        log_success "WireGuard service is active"
+    if ssh "$SSH_HOST" 'sudo systemctl is-active awg-quick@awg0' &>/dev/null; then
+        log_success "AmneziaWG service is active"
     else
-        log_error "WireGuard service is not running"
+        log_error "AmneziaWG service is not running"
         return 1
     fi
 }
@@ -79,7 +79,7 @@ verify_peer_count() {
     expected_count=$(yq e '.clients | length' "$INVENTORY_FILE")
 
     local actual_count
-    actual_count=$(ssh "$SSH_HOST" 'sudo wg show wg0 peers 2>/dev/null | wc -l' | tr -d ' ')
+    actual_count=$(ssh "$SSH_HOST" 'sudo awg show awg0 peers 2>/dev/null | wc -l' | tr -d ' ')
 
     echo "  Expected: $expected_count clients"
     echo "  Registered: $actual_count peers"
@@ -96,7 +96,7 @@ verify_no_duplicate_ips() {
     log_info "Checking for duplicate IP assignments..."
 
     local server_config
-    server_config=$(ssh "$SSH_HOST" 'sudo cat /etc/wireguard/wg0.conf')
+    server_config=$(ssh "$SSH_HOST" 'sudo cat /etc/amnezia/amneziawg/awg0.conf')
 
     local allowed_ips
     allowed_ips=$(echo "$server_config" | grep "AllowedIPs" | awk '{print $3}' | sort)
@@ -116,7 +116,7 @@ verify_no_duplicate_pubkeys() {
     log_info "Checking for duplicate public keys..."
 
     local server_config
-    server_config=$(ssh "$SSH_HOST" 'sudo cat /etc/wireguard/wg0.conf')
+    server_config=$(ssh "$SSH_HOST" 'sudo cat /etc/amnezia/amneziawg/awg0.conf')
 
     local pubkeys
     pubkeys=$(echo "$server_config" | grep "PublicKey" | awk '{print $3}' | sort)
@@ -139,7 +139,7 @@ verify_server_pubkey() {
     expected_pubkey=$(yq e '.server.public_key' "$INVENTORY_FILE")
 
     local server_privkey
-    server_privkey=$(ssh "$SSH_HOST" 'sudo cat /etc/wireguard/server_private.key')
+    server_privkey=$(ssh "$SSH_HOST" 'sudo cat /etc/wireguard/keys/server_private.key')
 
     local actual_pubkey
     actual_pubkey=$(echo "$server_privkey" | ssh "$SSH_HOST" 'wg pubkey')
@@ -155,17 +155,19 @@ verify_server_pubkey() {
 }
 
 verify_port_open() {
-    log_info "Checking VPN port (51820/udp)..."
+    log_info "Checking VPN port (54321/udp)..."
 
     local endpoint
     endpoint=$(yq e '.server.endpoint' "$INVENTORY_FILE")
     local server_ip
     server_ip=$(echo "$endpoint" | cut -d: -f1)
+    local server_port
+    server_port=$(echo "$endpoint" | cut -d: -f2)
 
-    if nc -zu "$server_ip" 51820 2>/dev/null; then
-        log_success "Port 51820/udp is reachable"
+    if nc -zu "$server_ip" "$server_port" 2>/dev/null; then
+        log_success "Port ${server_port}/udp is reachable"
     else
-        log_warning "Cannot verify UDP port 51820 (this is normal for UDP)"
+        log_warning "Cannot verify UDP port ${server_port} (this is normal for UDP)"
     fi
 }
 
@@ -173,7 +175,7 @@ check_connected_clients() {
     log_info "Checking connected clients..."
 
     local connected_count
-    connected_count=$(ssh "$SSH_HOST" 'sudo wg show wg0 | grep -c "latest handshake" || true')
+    connected_count=$(ssh "$SSH_HOST" 'sudo awg show awg0 | grep -c "latest handshake" || true')
 
     local total_count
     total_count=$(yq e '.clients | length' "$INVENTORY_FILE")
@@ -189,10 +191,24 @@ check_connected_clients() {
     fi
 }
 
+verify_obfuscation_params() {
+    log_info "Checking AmneziaWG obfuscation parameters..."
+
+    local jc
+    jc=$(ssh "$SSH_HOST" 'sudo awg show awg0 | grep "jc:" | awk "{print \$2}"')
+
+    if [[ -n "$jc" ]] && [[ "$jc" -gt 0 ]]; then
+        log_success "Obfuscation active (Jc=$jc)"
+    else
+        log_error "Obfuscation parameters not set"
+        return 1
+    fi
+}
+
 show_server_status() {
     log_info "Current server status:"
     echo ""
-    ssh "$SSH_HOST" 'sudo wg show wg0'
+    ssh "$SSH_HOST" 'sudo awg show awg0'
     echo ""
 }
 
@@ -227,7 +243,7 @@ print_summary() {
 
 main() {
     echo "================================================"
-    echo "VPN Client Verification"
+    echo "VPN Client Verification (AmneziaWG)"
     echo "================================================"
     echo ""
 
@@ -236,11 +252,12 @@ main() {
     local failed=0
 
     verify_server_reachable || ((failed++))
-    verify_wireguard_running || ((failed++))
+    verify_amneziawg_running || ((failed++))
     verify_peer_count || ((failed++))
     verify_no_duplicate_ips || ((failed++))
     verify_no_duplicate_pubkeys || ((failed++))
     verify_server_pubkey || ((failed++))
+    verify_obfuscation_params || ((failed++))
     verify_port_open || true  # Don't fail on this
     check_connected_clients || true  # Don't fail on this
     show_server_status

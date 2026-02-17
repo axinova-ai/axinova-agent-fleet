@@ -1,6 +1,8 @@
 # VPN Client Onboarding Guide
 
-This guide covers the automated batch provisioning workflow for onboarding VPN clients to the Axinova WireGuard VPN server.
+This guide covers the automated batch provisioning workflow for onboarding VPN clients to the Axinova AmneziaWG VPN server.
+
+> **Migration Note (2026-02-13):** The VPN has been migrated from WireGuard to AmneziaWG to bypass Deep Packet Inspection (DPI) by Chinese ISPs. AmneziaWG is a fork of WireGuard that adds traffic obfuscation while maintaining the same security and performance.
 
 ## Overview
 
@@ -103,7 +105,7 @@ The script will:
 
 # Expected checks:
 # ✅ Server reachable
-# ✅ WireGuard service active
+# ✅ AmneziaWG service active
 # ✅ All clients registered
 # ✅ No duplicate IPs
 # ✅ No duplicate public keys
@@ -133,35 +135,37 @@ scp /tmp/vpn-onboarding-*/configs/device-name.conf device-name:~/Downloads/
 
 # Install on device
 ssh device-name
-sudo mkdir -p /etc/wireguard
-sudo mv ~/Downloads/device-name.conf /etc/wireguard/wg0.conf
-sudo chmod 600 /etc/wireguard/wg0.conf
+sudo mkdir -p /etc/amnezia/amneziawg
+sudo mv ~/Downloads/device-name.conf /etc/amnezia/amneziawg/awg0.conf
+sudo chmod 600 /etc/amnezia/amneziawg/awg0.conf
 
 # Start VPN
-sudo wg-quick up wg0
+sudo awg-quick up awg0
 
 # Enable at boot (optional)
-sudo systemctl enable wg-quick@wg0
+sudo systemctl enable awg-quick@awg0
 ```
 
 **Windows Devices:**
 1. Copy `device-name.conf` to Windows device
-2. Install WireGuard from https://www.wireguard.com/install/
-3. Open WireGuard GUI
+2. Install AmneziaWG from https://github.com/amnezia-vpn/amneziawg-windows/releases
+3. Open AmneziaWG GUI
 4. Click "Add Tunnel" → "Import tunnel(s) from file"
 5. Select the config file
 6. Click "Activate"
 
 **Mobile Devices (iOS/Android):**
-1. Install WireGuard app from App Store/Play Store
+1. Install AmneziaWG app:
+   - **iOS:** https://apps.apple.com/us/app/amneziawg/id6478942365
+   - **Android:** AmneziaWG on Google Play
 2. Display QR code:
    ```bash
    cat /tmp/vpn-onboarding-*/qr-codes/device-name.txt
    # Or open PNG:
    open /tmp/vpn-onboarding-*/qr-codes/device-name.png
    ```
-3. In WireGuard app: Tap "+" → "Create from QR code"
-4. Scan the QR code
+3. In AmneziaWG app: Tap "+" → "Create from QR code"
+4. Scan the QR code (obfuscation parameters are included in the config)
 5. Toggle switch to connect
 
 ### Step 4: Client Testing
@@ -184,7 +188,7 @@ nslookup google.com
 
 ```bash
 # Check server status
-ssh sg-vpn 'sudo wg show wg0'
+ssh sg-vpn 'sudo awg show awg0'
 
 # Should show:
 # - All peers listed
@@ -257,6 +261,8 @@ rm -rf /tmp/vpn-onboarding-YYYYMMDD-HHMMSS/
 │   └── public.key (644, root:root)
 ```
 
+Note: Keys are still stored at `/etc/wireguard/clients/` for consistency with the original WireGuard setup, even though AmneziaWG configs are at `/etc/amnezia/amneziawg/`.
+
 **Local temporary storage:**
 - Keys fetched to `/tmp/vpn-onboarding-*/` during onboarding
 - Delete after distribution
@@ -296,18 +302,18 @@ This will:
 **Client can't connect:**
 ```bash
 # On server, check if peer is registered
-ssh sg-vpn 'sudo wg show wg0'
+ssh sg-vpn 'sudo awg show awg0'
 
 # On client, check interface status
-sudo wg show wg0
+sudo awg show awg0
 
 # Check firewall rules on server
 ssh sg-vpn 'sudo iptables -L -n -v'
 ```
 
 **No handshake appearing:**
-- Verify correct server endpoint (8.222.187.10:51820)
-- Check UDP port 51820 is not blocked by firewall
+- Verify correct server endpoint (8.222.187.10:54321)
+- Check UDP port 54321 is not blocked by firewall
 - Verify client config has correct server public key
 - Check system time is synchronized (NTP)
 
@@ -318,10 +324,10 @@ ssh sg-vpn 'sudo iptables -L -n -v'
 ./scripts/verify-vpn-clients.sh
 
 # Check specific client registration
-ssh sg-vpn 'sudo wg show wg0 dump' | grep <client-ip>
+ssh sg-vpn 'sudo awg show awg0 dump' | grep <client-ip>
 
 # Review server logs
-ssh sg-vpn 'sudo journalctl -u wg-quick@wg0 -n 50'
+ssh sg-vpn 'sudo journalctl -u awg-quick@awg0 -n 50'
 ```
 
 ## Advanced Operations
@@ -356,13 +362,13 @@ ssh sg-vpn 'sudo tar xzf /root/wireguard-clients-backup.tar.gz -C /'
 
 ```bash
 # Show all connected clients
-ssh sg-vpn 'sudo wg show wg0'
+ssh sg-vpn 'sudo awg show awg0'
 
 # Count active connections
-ssh sg-vpn 'sudo wg show wg0 | grep -c "latest handshake"'
+ssh sg-vpn 'sudo awg show awg0 | grep -c "latest handshake"'
 
 # Show bandwidth usage
-ssh sg-vpn 'sudo wg show wg0 transfer'
+ssh sg-vpn 'sudo awg show awg0 transfer'
 ```
 
 ## Architecture
@@ -381,7 +387,8 @@ ssh sg-vpn 'sudo wg show wg0 transfer'
 │ 2. onboard-vpn-clients.sh                              │
 │    - Generate keys on server                            │
 │    - Fetch keys locally                                 │
-│    - Generate configs + QR codes                        │
+│    - Generate AmneziaWG configs + QR codes              │
+│    - Include obfuscation parameters                     │
 └──────────────────┬──────────────────────────────────────┘
                    │
                    ▼
@@ -394,8 +401,9 @@ ssh sg-vpn 'sudo wg show wg0 transfer'
                    ▼
 ┌─────────────────────────────────────────────────────────┐
 │ 4. Deploy Server Config (Ansible)                      │
-│    - Dynamic Jinja2 template                            │
+│    - Dynamic Jinja2 template (awg0.conf)                │
 │    - Iterate all clients from client_ips dict           │
+│    - Deploy to /etc/amnezia/amneziawg/                  │
 └──────────────────┬──────────────────────────────────────┘
                    │
                    ▼
@@ -425,12 +433,12 @@ ssh sg-vpn 'sudo wg show wg0 transfer'
 - `ansible/scripts/onboard-vpn-clients.sh` - Main onboarding script
 - `ansible/scripts/verify-vpn-clients.sh` - Verification script
 - `ansible/scripts/distribute-client-configs.sh` - Distribution helper
-- `ansible/roles/wireguard_server/templates/wg0.conf.j2` - Server config template
+- `ansible/roles/wireguard_server/templates/awg0.conf.j2` - Server config template
 - `ansible/roles/wireguard_server/defaults/main.yml` - Ansible variables (auto-updated)
 
 ### Server Details
 
-- **Endpoint**: 8.222.187.10:51820
+- **Endpoint**: 8.222.187.10:54321
 - **VPN Network**: 10.66.66.0/24
 - **Server IP**: 10.66.66.1
 - **DNS**: 1.1.1.1

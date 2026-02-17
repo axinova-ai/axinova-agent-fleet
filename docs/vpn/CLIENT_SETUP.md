@@ -1,6 +1,8 @@
-# WireGuard VPN Client Setup Guide
+# AmneziaWG VPN Client Setup Guide
 
-This guide covers setting up WireGuard VPN clients to connect to the Singapore VPN server (8.222.187.10).
+This guide covers setting up AmneziaWG VPN clients to connect to the Singapore VPN server (8.222.187.10).
+
+> **Migration Note (2026-02-13):** The VPN has been migrated from WireGuard to AmneziaWG. AmneziaWG is a fork of WireGuard that adds traffic obfuscation to bypass Deep Packet Inspection (DPI) used by Chinese ISPs. The underlying WireGuard protocol and cryptography remain unchanged.
 
 ## Prerequisites
 
@@ -19,9 +21,11 @@ ssh sg-vpn 'cat /etc/wireguard/keys/server_public.key'
 
 You'll need this key for all client configurations below.
 
+Note: Keys are still stored at `/etc/wireguard/keys/` even though AmneziaWG configs are at `/etc/amnezia/amneziawg/`.
+
 ## Server Details
 
-- **Server Endpoint:** `8.222.187.10:51820`
+- **Server Endpoint:** `8.222.187.10:54321`
 - **Server VPN IP:** `10.66.66.1`
 - **VPN Network:** `10.66.66.0/24`
 - **DNS:** `1.1.1.1`
@@ -40,72 +44,71 @@ You'll need this key for all client configurations below.
 
 ## macOS / Mac mini Setup
 
-### Option 1: Using Bootstrap Script (Recommended)
+### Installation
 
-```bash
-cd /Users/weixia/axinova/axinova-agent-fleet/bootstrap/vpn
-./wireguard-install.sh
-```
-
-This script will:
-1. Install WireGuard via Homebrew
-2. Generate client keys
-3. Create config template at `/etc/wireguard/wg0.conf`
-
-### Option 2: Manual Setup
-
-1. **Install WireGuard:**
+1. **Install AmneziaWG:**
    ```bash
-   brew install wireguard-tools
+   # Download from GitHub releases
+   # https://github.com/amnezia-vpn/amneziawg-apple/releases
+   # Install the .pkg file for macOS
+   ```
+
+   Or use Homebrew if available:
+   ```bash
+   brew install amneziawg-tools
    ```
 
 2. **Generate keys:**
    ```bash
-   wg genkey | tee privatekey | wg pubkey > publickey
+   awg genkey | tee privatekey | awg pubkey > publickey
    ```
 
-3. **Create config** at `/etc/wireguard/wg0.conf`:
+3. **Create config** at `/etc/amnezia/amneziawg/awg0.conf`:
    ```ini
    [Interface]
    PrivateKey = <content of privatekey file>
    Address = 10.66.66.2/24  # Use assigned IP
    DNS = 1.1.1.1
+   Jc = 3
+   Jmin = 50
+   Jmax = 1000
+   S1 = 0
+   S2 = 0
+   H1 = 1
+   H2 = 2
+   H3 = 3
+   H4 = 4
 
    [Peer]
    PublicKey = <SERVER_PUBLIC_KEY>
-   Endpoint = 8.222.187.10:51820
+   Endpoint = 8.222.187.10:54321
    AllowedIPs = 0.0.0.0/0
    PersistentKeepalive = 25
    ```
 
 4. **Secure the config:**
    ```bash
-   sudo chmod 600 /etc/wireguard/wg0.conf
+   sudo mkdir -p /etc/amnezia/amneziawg
+   sudo chmod 600 /etc/amnezia/amneziawg/awg0.conf
    ```
 
 ### Starting the VPN
 
 **Manual start:**
 ```bash
-sudo wg-quick up wg0
+sudo awg-quick up awg0
 ```
 
 **Stop:**
 ```bash
-sudo wg-quick down wg0
+sudo awg-quick down awg0
 ```
 
 **Auto-start on boot:**
 ```bash
-# Create launchd plist
-sudo cp /Users/weixia/axinova/axinova-agent-fleet/bootstrap/vpn/com.wireguard.wg0.plist /Library/LaunchDaemons/
-sudo launchctl load /Library/LaunchDaemons/com.wireguard.wg0.plist
-```
-
-**Using connect script:**
-```bash
-cd /Users/weixia/axinova/axinova-agent-fleet/bootstrap/vpn
-./connect-sg.sh
+# Create launchd plist (similar to WireGuard but for AmneziaWG)
+sudo systemctl enable awg-quick@awg0  # On Linux
+# For macOS, create a custom launchd plist pointing to awg-quick
 ```
 
 ---
@@ -114,41 +117,50 @@ cd /Users/weixia/axinova/axinova-agent-fleet/bootstrap/vpn
 
 ### Installation
 
-1. Download WireGuard for Windows from: https://www.wireguard.com/install/
+1. Download AmneziaWG for Windows from: https://github.com/amnezia-vpn/amneziawg-windows/releases
 2. Run the installer (requires admin privileges)
 
 ### Configuration
 
 1. **Generate keys** (in PowerShell):
    ```powershell
-   # Install WireGuard first, then use its CLI
-   cd "C:\Program Files\WireGuard"
-   .\wg.exe genkey | Tee-Object -FilePath privatekey | .\wg.exe pubkey > publickey
+   # Install AmneziaWG first, then use its CLI
+   cd "C:\Program Files\AmneziaWG"
+   .\awg.exe genkey | Tee-Object -FilePath privatekey | .\awg.exe pubkey > publickey
    ```
 
-2. **Create config file** `wg0-sg.conf`:
+2. **Create config file** `awg0-sg.conf`:
    ```ini
    [Interface]
    PrivateKey = <content of privatekey>
    Address = 10.66.66.4/24  # windows-1, use 10.66.66.5 for windows-2
    DNS = 1.1.1.1
+   Jc = 3
+   Jmin = 50
+   Jmax = 1000
+   S1 = 0
+   S2 = 0
+   H1 = 1
+   H2 = 2
+   H3 = 3
+   H4 = 4
 
    [Peer]
    PublicKey = <SERVER_PUBLIC_KEY>
-   Endpoint = 8.222.187.10:51820
+   Endpoint = 8.222.187.10:54321
    AllowedIPs = 0.0.0.0/0
    PersistentKeepalive = 25
    ```
 
-3. **Import in WireGuard GUI:**
-   - Open WireGuard application
+3. **Import in AmneziaWG GUI:**
+   - Open AmneziaWG application
    - Click "Import tunnel(s) from file"
-   - Select the `wg0-sg.conf` file
+   - Select the `awg0-sg.conf` file
    - Click "Activate"
 
 ### Managing Connection
 
-- **Connect:** Click "Activate" in WireGuard GUI
+- **Connect:** Click "Activate" in AmneziaWG GUI
 - **Disconnect:** Click "Deactivate"
 - **Auto-start:** Right-click tunnel → "Enable at boot"
 
@@ -158,9 +170,9 @@ cd /Users/weixia/axinova/axinova-agent-fleet/bootstrap/vpn
 
 ### Installation
 
-1. Install WireGuard from Google Play Store: https://play.google.com/store/apps/details?id=com.wireguard.android
+1. Install AmneziaWG from Google Play Store: Search for "AmneziaWG"
 
-### Configuration via QR Code (Easiest)
+### Configuration via QR Code (Recommended)
 
 1. **Generate QR code on your laptop:**
    ```bash
@@ -169,10 +181,11 @@ cd /Users/weixia/axinova/axinova-agent-fleet/bootstrap/vpn
    ```
 
 2. **Scan QR code:**
-   - Open WireGuard app on Android
+   - Open AmneziaWG app on Android
    - Tap "+" button
    - Select "Scan from QR code"
    - Scan the QR code displayed in terminal or saved PNG
+   - The obfuscation parameters are automatically included
 
 3. **Name the tunnel** (e.g., "SG VPN")
 
@@ -180,20 +193,26 @@ cd /Users/weixia/axinova/axinova-agent-fleet/bootstrap/vpn
 
 1. **Generate keys on laptop** (easier than on mobile):
    ```bash
-   wg genkey | tee android_private.key | wg pubkey > android_public.key
+   awg genkey | tee android_private.key | awg pubkey > android_public.key
    ```
 
-2. **In WireGuard app:**
+2. **In AmneziaWG app:**
    - Tap "+" → "Create from scratch"
    - **Interface section:**
      - Name: `SG VPN`
      - Private key: Paste from `android_private.key`
      - Addresses: `10.66.66.6/24`
      - DNS servers: `1.1.1.1`
+     - **AmneziaWG settings:**
+       - Jc: `3`
+       - Jmin: `50`
+       - Jmax: `1000`
+       - S1: `0`, S2: `0`
+       - H1: `1`, H2: `2`, H3: `3`, H4: `4`
 
    - **Peer section:**
      - Public key: `<SERVER_PUBLIC_KEY>`
-     - Endpoint: `8.222.187.10:51820`
+     - Endpoint: `8.222.187.10:54321`
      - Allowed IPs: `0.0.0.0/0`
      - Persistent keepalive: `25`
 
@@ -211,9 +230,11 @@ cd /Users/weixia/axinova/axinova-agent-fleet/bootstrap/vpn
 
 Similar to Android:
 
-1. Install WireGuard from App Store: https://apps.apple.com/us/app/wireguard/id1441195209
-2. Use QR code method or manual config (same steps as Android)
-3. Assigned IP: Use available IP from range (e.g., 10.66.66.7)
+1. Install AmneziaWG from App Store: https://apps.apple.com/us/app/amneziawg/id6478942365
+2. Use QR code method (recommended) or manual config
+3. When scanning QR code, the obfuscation parameters are automatically included
+4. Manual config requires entering the same AmneziaWG settings as Android (Jc, Jmin, Jmax, S1, S2, H1-H4)
+5. Assigned IP: Use available IP from range (e.g., 10.66.66.7)
 
 ---
 
@@ -243,7 +264,7 @@ After generating client keys, you **must** add the client's public key to the se
 
 2. **Edit config:**
    ```bash
-   sudo nano /etc/wireguard/wg0.conf
+   sudo nano /etc/amnezia/amneziawg/awg0.conf
    ```
 
 3. **Add peer section:**
@@ -253,10 +274,10 @@ After generating client keys, you **must** add the client's public key to the se
    AllowedIPs = 10.66.66.2/32
    ```
 
-4. **Restart WireGuard:**
+4. **Restart AmneziaWG:**
    ```bash
-   sudo wg-quick down wg0
-   sudo wg-quick up wg0
+   sudo awg-quick down awg0
+   sudo awg-quick up awg0
    ```
 
 ---
@@ -277,20 +298,20 @@ After generating client keys, you **must** add the client's public key to the se
    ```
    Expected: `8.222.187.10` (Singapore IP)
 
-3. **Check WireGuard status:**
+3. **Check AmneziaWG status:**
    ```bash
    # macOS/Linux
-   sudo wg show
+   sudo awg show
 
    # Windows (PowerShell as admin)
-   & "C:\Program Files\WireGuard\wg.exe" show
+   & "C:\Program Files\AmneziaWG\awg.exe" show
    ```
    Expected: Shows interface, peer, latest handshake
 
 ### On Server
 
 ```bash
-ssh sg-vpn 'wg show wg0'
+ssh sg-vpn 'awg show awg0'
 ```
 
 Expected output:
@@ -306,17 +327,17 @@ Expected output:
 
 1. **Check server is running:**
    ```bash
-   ssh sg-vpn 'systemctl status wg-quick@wg0'
+   ssh sg-vpn 'systemctl status awg-quick@awg0'
    ```
 
-2. **Verify firewall allows UDP 51820:**
+2. **Verify firewall allows UDP 54321:**
    ```bash
    ssh sg-vpn 'sudo ufw status'
    ```
 
 3. **Check client public key is on server:**
    ```bash
-   ssh sg-vpn 'sudo cat /etc/wireguard/wg0.conf | grep -A 2 "YOUR_PUBLIC_KEY"'
+   ssh sg-vpn 'sudo cat /etc/amnezia/amneziawg/awg0.conf | grep -A 2 "YOUR_PUBLIC_KEY"'
    ```
 
 ### No Internet Access
@@ -346,7 +367,7 @@ Expected output:
 
 2. **Check server logs:**
    ```bash
-   ssh sg-vpn 'sudo journalctl -u wg-quick@wg0 -n 50'
+   ssh sg-vpn 'sudo journalctl -u awg-quick@awg0 -n 50'
    ```
 
 ---
@@ -363,10 +384,10 @@ Expected output:
 
 3. **Revoke compromised keys:**
    - Remove peer from server config
-   - Restart WireGuard: `sudo wg-quick down wg0 && sudo wg-quick up wg0`
+   - Restart AmneziaWG: `sudo awg-quick down awg0 && sudo awg-quick up awg0`
 
 4. **Monitor connections:**
-   - Regularly check active peers: `ssh sg-vpn 'wg show'`
+   - Regularly check active peers: `ssh sg-vpn 'awg show'`
    - Watch for unknown public keys
 
 ---
@@ -390,9 +411,10 @@ This keeps normal internet traffic on local connection, only VPN network goes th
 
 ## Additional Resources
 
-- WireGuard Official Site: https://www.wireguard.com/
-- WireGuard Quick Start: https://www.wireguard.com/quickstart/
-- Troubleshooting Guide: https://www.wireguard.com/quickstart/#nat-and-firewall-traversal-persistence
+- AmneziaWG GitHub: https://github.com/amnezia-vpn/amneziawg
+- AmneziaWG iOS App: https://github.com/amnezia-vpn/amneziawg-apple
+- AmneziaWG Windows App: https://github.com/amnezia-vpn/amneziawg-windows
+- WireGuard Official Site (original protocol): https://www.wireguard.com/
 
 ---
 
@@ -400,6 +422,7 @@ This keeps normal internet traffic on local connection, only VPN network goes th
 
 For issues with VPN setup:
 1. Check this guide's troubleshooting section
-2. Review server logs: `ssh sg-vpn 'journalctl -u wg-quick@wg0'`
-3. Verify configuration files match examples
+2. Review server logs: `ssh sg-vpn 'journalctl -u awg-quick@awg0'`
+3. Verify configuration files match examples (including obfuscation parameters)
 4. Test connectivity step-by-step (ping, curl, handshake)
+5. Ensure obfuscation parameters (Jc, Jmin, Jmax, S1, S2, H1-H4) match server config

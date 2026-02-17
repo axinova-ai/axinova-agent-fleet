@@ -2,9 +2,13 @@
 
 ⚠️ **This directory contains PRIVATE KEYS and is excluded from git**
 
+## Migration Notice (2026-02-13)
+
+The VPN has been migrated from WireGuard to AmneziaWG. All configs in this directory are now AmneziaWG configs with traffic obfuscation enabled. Old WireGuard configs have been archived to `vpn-distribution-wireguard-archive/`.
+
 ## Purpose
 
-This directory holds the generated VPN client configurations and QR codes for distribution to devices. All files in this directory contain sensitive private keys and must NOT be committed to version control.
+This directory holds the generated AmneziaWG client configurations and QR codes for distribution to devices. All files in this directory contain sensitive private keys and must NOT be committed to version control.
 
 ## Contents
 
@@ -82,6 +86,8 @@ cp /tmp/vpn-onboarding-*/*.txt /tmp/vpn-onboarding-*/*.md vpn-distribution/docum
 
 ---
 
-**Generated:** 2026-02-08
-**VPN Server:** 8.222.187.10:51820 (Singapore)
-**Documentation:** See `ansible/docs/vpn/ONBOARDING.md` for full guide
+**Last Updated:** 2026-02-13 (migrated to AmneziaWG)
+**Generated:** 2026-02-08 (original WireGuard), 2026-02-13 (AmneziaWG migration)
+**VPN Server:** 8.222.187.10:54321 (Singapore)
+**Protocol:** AmneziaWG (WireGuard with obfuscation)
+**Documentation:** See `docs/vpn/ONBOARDING.md` and `docs/vpn/CLIENT_SETUP.md` for full guide

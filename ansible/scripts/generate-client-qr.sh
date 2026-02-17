@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Generate WireGuard client config and QR code for mobile devices
+# Generate AmneziaWG client config and QR code for mobile devices
 # Usage: ./generate-client-qr.sh <client-name> <client-ip>
 
 if [[ $# -lt 2 ]]; then
@@ -12,7 +12,18 @@ fi
 
 CLIENT_NAME="$1"
 CLIENT_IP="$2"
-SERVER_ENDPOINT="8.222.187.10:51820"
+SERVER_ENDPOINT="8.222.187.10:54321"
+
+# AmneziaWG obfuscation parameters
+AWG_JC=5
+AWG_JMIN=50
+AWG_JMAX=1000
+AWG_S1=45
+AWG_S2=75
+AWG_H1=1009484
+AWG_H2=2147444
+AWG_H3=3088611
+AWG_H4=4166003
 
 # Check for qrencode
 if ! command -v qrencode &> /dev/null; then
@@ -37,25 +48,34 @@ echo ""
 echo "Enter server public key (from: ssh sg-vpn 'cat /etc/wireguard/keys/server_public.key'):"
 read -r SERVER_PUBLIC_KEY
 
-# Generate client config
+# Generate client config with AmneziaWG obfuscation
 CLIENT_CONFIG="[Interface]
 PrivateKey = $PRIVATE_KEY
-Address = $CLIENT_IP/24
+Address = $CLIENT_IP/32
 DNS = 1.1.1.1
+Jc = $AWG_JC
+Jmin = $AWG_JMIN
+Jmax = $AWG_JMAX
+S1 = $AWG_S1
+S2 = $AWG_S2
+H1 = $AWG_H1
+H2 = $AWG_H2
+H3 = $AWG_H3
+H4 = $AWG_H4
 
 [Peer]
 PublicKey = $SERVER_PUBLIC_KEY
 Endpoint = $SERVER_ENDPOINT
-AllowedIPs = 0.0.0.0/0
+AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25"
 
 echo ""
-echo "=== Client Configuration ==="
+echo "=== Client Configuration (AmneziaWG) ==="
 echo "$CLIENT_CONFIG"
 echo ""
 
 # Save to file
-CONFIG_FILE="${CLIENT_NAME}_wg0.conf"
+CONFIG_FILE="${CLIENT_NAME}_awg0.conf"
 echo "$CLIENT_CONFIG" > "$CONFIG_FILE"
 echo "Saved to: $CONFIG_FILE"
 
@@ -66,7 +86,7 @@ echo "QR code saved to: $QR_FILE"
 
 # Display QR in terminal
 echo ""
-echo "=== QR Code (scan with WireGuard mobile app) ==="
+echo "=== QR Code (scan with AmneziaWG mobile app) ==="
 echo "$CLIENT_CONFIG" | qrencode -t ansiutf8
 
 echo ""
@@ -77,10 +97,14 @@ echo "   ${CLIENT_NAME}_pubkey: \"$PUBLIC_KEY\""
 echo ""
 echo "2. Re-run: ansible/scripts/setup-vpn.sh"
 echo ""
-echo "3. Or manually add to server /etc/wireguard/wg0.conf:"
+echo "3. Or manually add to server /etc/amnezia/amneziawg/awg0.conf:"
 echo "[Peer] # $CLIENT_NAME"
 echo "PublicKey = $PUBLIC_KEY"
 echo "AllowedIPs = $CLIENT_IP/32"
 echo ""
-echo "Then restart: ssh sg-vpn 'wg-quick down wg0 && wg-quick up wg0'"
+echo "Then restart: ssh sg-vpn 'awg-quick down awg0 && awg-quick up awg0'"
+echo ""
+echo "IMPORTANT: Client must use AmneziaWG app (NOT WireGuard)"
+echo "  iOS:     https://apps.apple.com/us/app/amneziawg/id6478942365"
+echo "  Android: AmneziaWG on Google Play"
 echo ""

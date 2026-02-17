@@ -1,4 +1,9 @@
 ---
+- name: Add AmneziaWG PPA
+  apt_repository:
+    repo: ppa:amnezia/ppa
+    state: present
+
 - name: Update apt cache
   apt:
     update_cache: yes
@@ -7,11 +12,41 @@
 - name: Install required packages
   apt:
     name:
-      - wireguard
-      - wireguard-tools
+      - amneziawg
+      - amneziawg-dkms
+      - amneziawg-tools
       - iptables
       - ufw
       - qrencode
+    state: present
+
+- name: Patch AmneziaWG DKMS source for kernel 5.15 compatibility
+  shell: |
+    cd /usr/src/amneziawg-*/
+    if grep -q 'timer_delete' device.c timers.c 2>/dev/null; then
+      sed -i 's/timer_delete_sync/del_timer_sync/g; s/timer_delete/del_timer/g' device.c timers.c
+      echo "patched"
+    else
+      echo "already_patched"
+    fi
+  register: dkms_patch
+  changed_when: "'patched' in dkms_patch.stdout and 'already' not in dkms_patch.stdout"
+  when: ansible_kernel is version('6.0', '<')
+
+- name: Build AmneziaWG DKMS module
+  shell: |
+    dkms status amneziawg | grep -q 'installed' && echo "already_installed" && exit 0
+    dkms remove amneziawg/1.0.0 --all 2>/dev/null || true
+    dkms add amneziawg/1.0.0
+    dkms build amneziawg/1.0.0 -k $(uname -r)
+    dkms install amneziawg/1.0.0 -k $(uname -r)
+    echo "installed"
+  register: dkms_build
+  changed_when: "'installed' in dkms_build.stdout and 'already' not in dkms_build.stdout"
+
+- name: Load AmneziaWG kernel module
+  modprobe:
+    name: amneziawg
     state: present
 
 - name: Enable IP forwarding
@@ -22,15 +57,15 @@
     state: present
     reload: yes
 
-- name: Create WireGuard keys directory
+- name: Create AmneziaWG keys directory
   file:
-    path: "{{ wireguard_keys_dir }}"
+    path: "{{ amneziawg_keys_dir }}"
     state: directory
     mode: '0700'
 
 - name: Check if server private key exists
   stat:
-    path: "{{ wireguard_keys_dir }}/server_private.key"
+    path: "{{ amneziawg_keys_dir }}/server_private.key"
   register: server_private_key_file
 
 - name: Generate server private key
@@ -41,13 +76,13 @@
 - name: Save server private key
   copy:
     content: "{{ server_private_key_output.stdout }}"
-    dest: "{{ wireguard_keys_dir }}/server_private.key"
+    dest: "{{ amneziawg_keys_dir }}/server_private.key"
     mode: '0600'
   when: not server_private_key_file.stat.exists
 
 - name: Read server private key
   slurp:
-    src: "{{ wireguard_keys_dir }}/server_private.key"
+    src: "{{ amneziawg_keys_dir }}/server_private.key"
   register: server_private_key_slurp
 
 - name: Set server private key variable
@@ -62,15 +97,21 @@
 - name: Save server public key
   copy:
     content: "{{ server_public_key_output.stdout }}"
-    dest: "{{ wireguard_keys_dir }}/server_public.key"
+    dest: "{{ amneziawg_keys_dir }}/server_public.key"
     mode: '0644'
 
-- name: Create WireGuard server configuration
+- name: Create AmneziaWG config directory
+  file:
+    path: "{{ amneziawg_dir }}"
+    state: directory
+    mode: '0700'
+
+- name: Create AmneziaWG server configuration
   template:
-    src: wg0.conf.j2
-    dest: "{{ wireguard_config }}"
+    src: awg0.conf.j2
+    dest: "{{ amneziawg_config }}"
     mode: '0600'
-  notify: restart wireguard
+  notify: restart amneziawg
 
 - name: Configure UFW - Allow SSH
   ufw:
@@ -78,7 +119,7 @@
     port: '22'
     proto: tcp
 
-- name: Configure UFW - Allow WireGuard
+- name: Configure UFW - Allow AmneziaWG
   ufw:
     rule: allow
     port: "{{ vpn_port }}"
@@ -89,9 +130,16 @@
     state: enabled
     policy: deny
 
-- name: Enable WireGuard service
+- name: Disable old WireGuard service
   systemd:
     name: wg-quick@wg0
+    enabled: no
+    state: stopped
+  ignore_errors: yes
+
+- name: Enable AmneziaWG service
+  systemd:
+    name: awg-quick@awg0
     enabled: yes
     state: started
 
@@ -99,11 +147,12 @@
   debug:
     msg: |
       ===================================================
-      WireGuard Server Setup Complete!
+      AmneziaWG Server Setup Complete!
       ===================================================
       Server Public Key: {{ server_public_key_output.stdout }}
       Server Endpoint: {{ ansible_host }}:{{ vpn_port }}
       Server VPN IP: {{ vpn_server_ip }}
 
       Use this public key when configuring clients.
+      Clients MUST use the AmneziaWG app (not WireGuard).
       ===================================================

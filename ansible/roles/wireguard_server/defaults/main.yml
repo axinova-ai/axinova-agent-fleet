@@ -1,18 +1,31 @@
 ---
-# WireGuard Server Default Variables
+# AmneziaWG Server Default Variables
+# (Migrated from WireGuard to defeat DPI blocking)
 
 # Network configuration
 vpn_network: "10.66.66.0/24"
 vpn_server_ip: "10.66.66.1"
-vpn_port: 51820
+vpn_port: 54321
 # DNS servers for clients
 vpn_dns: "1.1.1.1"
 # Server network interface (usually eth0 on cloud VMs)
 server_interface: "eth0"
-# WireGuard configuration directory
-wireguard_dir: "/etc/wireguard"
-wireguard_config: "{{ wireguard_dir }}/wg0.conf"
-wireguard_keys_dir: "{{ wireguard_dir }}/keys"
+# AmneziaWG configuration directory
+amneziawg_dir: "/etc/amnezia/amneziawg"
+amneziawg_config: "{{ amneziawg_dir }}/awg0.conf"
+amneziawg_keys_dir: "/etc/wireguard/keys"
+
+# AmneziaWG obfuscation parameters (must match on server and all clients)
+awg_jc: 5          # Junk packets before handshake
+awg_jmin: 50       # Min junk packet size (bytes)
+awg_jmax: 1000     # Max junk packet size (bytes)
+awg_s1: 45         # Random prefix on Init packet
+awg_s2: 75         # Random prefix on Response packet
+awg_h1: 1009484    # Custom header for Init
+awg_h2: 2147444    # Custom header for Response
+awg_h3: 3088611    # Custom header for Cookie/Underload
+awg_h4: 4166003    # Custom header for Transport
+
 client_ips:
   m2_pro_agent_2: 10.66.66.2
   m4_agent_1: 10.66.66.3
@@ -22,6 +35,8 @@ client_ips:
   wei_hp_windows: 10.66.66.13
   wei_android_xiaomi_ultra14: 10.66.66.14
   lisha_iphone: 10.66.66.15
+  lisha_macbook_air_for_wei: 10.66.66.16
+  lisha_dell_windows: 10.66.66.17
 m2_pro_agent_2_pubkey: WT+eS34Y6zDJhqCJUHZTTHvSJmocAMOOY7sNhfUTrx4=
 m4_agent_1_pubkey: /MqcCgjvBgGM7wPRH8dNgG4qi49oGZBnMiQq4ZdeYgk=
 wei_iphone_pubkey: JVI0Vbst1CRxxymJqwBbSQ4tcnAJCEvOKshwVJgmBhg=
@@ -30,3 +45,5 @@ wei_macbook_pro_pubkey: 9Mw7aOAZ9lVszLymEgffQtNQr0c06XSqqbo3lXMKFw8=
 wei_hp_windows_pubkey: Q4AHdLhd5m+AECb0EmXLuBwc1UTwzaj/t7IVEtqQcks=
 wei_android_xiaomi_ultra14_pubkey: py3Y6EwUPlwbjsapRp1lgeFb3+B7eZ6EqDrpH9zCfig=
 lisha_iphone_pubkey: 2MmIot6priqSx7JQkvSucPUmESyxzHFu5aTazJCG3kM=
+lisha_macbook_air_for_wei_pubkey: 36/TevNYcES+JjvYCZ4J6xvmK44746KT+3CAiEC13W0=
+lisha_dell_windows_pubkey: XSA0dh168pTcg1qvDlAJMMvRB3KKN6QWfHNjQ3esczo=

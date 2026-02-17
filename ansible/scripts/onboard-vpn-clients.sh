@@ -15,6 +15,17 @@ OUTPUT_DIR="/tmp/vpn-onboarding-$(date +%Y%m%d-%H%M%S)"
 SSH_HOST="sg-vpn"
 SERVER_KEYS_DIR="/etc/wireguard/clients"
 
+# AmneziaWG obfuscation parameters (must match server config)
+AWG_JC=5
+AWG_JMIN=50
+AWG_JMAX=1000
+AWG_S1=45
+AWG_S2=75
+AWG_H1=1009484
+AWG_H2=2147444
+AWG_H3=3088611
+AWG_H4=4166003
+
 # Options
 FORCE_REGENERATE=false
 if [[ "${1:-}" == "--force-regenerate" ]]; then
@@ -175,7 +186,7 @@ fetch_keys_to_local() {
 }
 
 generate_client_configs() {
-    log_info "Generating client configuration files..."
+    log_info "Generating AmneziaWG client configuration files..."
 
     mkdir -p "$OUTPUT_DIR/configs"
 
@@ -213,6 +224,15 @@ generate_client_configs() {
 PrivateKey = $private_key
 Address = $client_ip/32
 DNS = $dns
+Jc = $AWG_JC
+Jmin = $AWG_JMIN
+Jmax = $AWG_JMAX
+S1 = $AWG_S1
+S2 = $AWG_S2
+H1 = $AWG_H1
+H2 = $AWG_H2
+H3 = $AWG_H3
+H4 = $AWG_H4
 
 [Peer]
 PublicKey = $server_pubkey
@@ -345,12 +365,12 @@ verify_deployment() {
 
         # Get server status
         echo "Server Status:"
-        ssh "$SSH_HOST" 'sudo wg show wg0'
+        ssh "$SSH_HOST" 'sudo awg show awg0'
         echo ""
 
         # Count peers
         local peer_count
-        peer_count=$(ssh "$SSH_HOST" 'sudo wg show wg0 peers' | wc -l)
+        peer_count=$(ssh "$SSH_HOST" 'sudo awg show awg0 peers' | wc -l)
 
         echo "Registered Peers: $peer_count"
 
@@ -411,34 +431,42 @@ print_distribution_guide() {
 
     {
         echo "================================================"
-        echo "VPN Client Onboarding Complete"
+        echo "VPN Client Onboarding Complete (AmneziaWG)"
         echo "================================================"
         echo ""
         echo "Output Directory: $OUTPUT_DIR"
         echo ""
+        echo "IMPORTANT: All clients MUST use the AmneziaWG app"
+        echo "(NOT the standard WireGuard app)"
+        echo ""
+        echo "  iOS:     https://apps.apple.com/us/app/amneziawg/id6478942365"
+        echo "  Android: AmneziaWG on Google Play"
+        echo "  macOS:   https://github.com/amnezia-vpn/amneziawg-apple/releases"
+        echo "  Windows: https://github.com/amnezia-vpn/amneziawg-windows/releases"
+        echo ""
         echo "Distribution Guide:"
         echo ""
         echo "macOS Devices:"
-        echo "  1. SCP config file to device"
-        echo "  2. sudo mv <config> /etc/wireguard/wg0.conf"
-        echo "  3. sudo chmod 600 /etc/wireguard/wg0.conf"
-        echo "  4. sudo wg-quick up wg0"
+        echo "  1. Install AmneziaWG app from GitHub releases"
+        echo "  2. Import .conf file via the app"
+        echo "  3. Or: sudo mv <config> /etc/amnezia/amneziawg/awg0.conf"
+        echo "  4. Or: sudo awg-quick up awg0"
         echo ""
         echo "Windows Devices:"
-        echo "  1. Copy config file to device"
-        echo "  2. Open WireGuard GUI application"
-        echo "  3. Import tunnel from file"
-        echo "  4. Click 'Activate'"
+        echo "  1. Install AmneziaWG from GitHub releases"
+        echo "  2. Import tunnel from file"
+        echo "  3. Click 'Activate'"
         echo ""
         echo "Mobile Devices (iOS/Android):"
-        echo "  1. Display QR code: cat $OUTPUT_DIR/qr-codes/<device>.txt"
-        echo "  2. Or open PNG: $OUTPUT_DIR/qr-codes/<device>.png"
-        echo "  3. Scan with WireGuard app"
+        echo "  1. Install AmneziaWG app from App Store / Play Store"
+        echo "  2. Display QR code: cat $OUTPUT_DIR/qr-codes/<device>.txt"
+        echo "  3. Or open PNG: $OUTPUT_DIR/qr-codes/<device>.png"
+        echo "  4. Scan with AmneziaWG app"
         echo ""
         echo "Verification:"
         echo "  - From client: ping 10.66.66.1"
         echo "  - Check public IP: curl ifconfig.me (should show 8.222.187.10)"
-        echo "  - Server status: ssh sg-vpn 'sudo wg show wg0'"
+        echo "  - Server status: ssh sg-vpn 'sudo awg show awg0'"
         echo ""
         echo "Security Reminder:"
         echo "  ⚠️  Delete temporary directory after distribution:"
@@ -453,7 +481,7 @@ print_distribution_guide() {
 
 main() {
     echo "================================================"
-    echo "VPN Client Batch Onboarding"
+    echo "VPN Client Batch Onboarding (AmneziaWG)"
     echo "================================================"
     echo ""
 

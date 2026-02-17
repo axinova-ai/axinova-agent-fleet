@@ -46,9 +46,35 @@ clients:
     description: "Lisha's iPhone"
     generate_qr: true
 
+  - name: lisha-macbook-air-for-wei
+    device_type: macos
+    ip: 10.66.66.16
+    description: "Lisha's MacBook Air - Wei's Account"
+
+  - name: lisha-dell-windows
+    device_type: windows
+    ip: 10.66.66.17
+    description: "Lisha's Dell Windows Laptop"
+
+  - name: wei-m1-macbook-air
+    device_type: macos
+    ip: 10.66.66.18
+    description: "Wei's M1 MacBook Air - Daily Coding Machine"
+
+  - name: hua-iphone
+    device_type: ios
+    ip: 10.66.66.19
+    description: "Hua's iPhone"
+    generate_qr: true
+
+  - name: hua-windows-os
+    device_type: windows
+    ip: 10.66.66.20
+    description: "Hua's Windows Machine"
+
 # Server configuration (reference)
 server:
-  endpoint: "8.222.187.10:51820"
+  endpoint: "8.222.187.10:54321"
   public_key: "4utg8R6pINVXmF0EilIQx2LAtndqO0plkv2kdEwf3QE="
   vpn_network: "10.66.66.0/24"
   dns: "1.1.1.1"

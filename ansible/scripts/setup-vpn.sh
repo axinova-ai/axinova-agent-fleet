@@ -11,7 +11,7 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ANSIBLE_DIR="$(dirname "$SCRIPT_DIR")"
 
-echo -e "${GREEN}=== WireGuard VPN Server Setup ===${NC}"
+echo -e "${GREEN}=== AmneziaWG VPN Server Setup ===${NC}"
 echo ""
 
 # Check if Ansible is installed
@@ -57,12 +57,12 @@ echo "Next steps:"
 echo "  1. SSH to server and get the public key:"
 echo "     ssh sg-vpn 'cat /etc/wireguard/keys/server_public.key'"
 echo ""
-echo "  2. Configure clients with this server public key"
+echo "  2. Configure clients with AmneziaWG app (NOT WireGuard)"
 echo "     See: docs/vpn/CLIENT_SETUP.md"
 echo ""
 echo "  3. After generating client keys, update defaults/main.yml with client public keys"
 echo "     Then re-run this script to update server config"
 echo ""
 echo "  4. Verify server status:"
-echo "     ssh sg-vpn 'wg show'"
+echo "     ssh sg-vpn 'awg show awg0'"
 echo ""

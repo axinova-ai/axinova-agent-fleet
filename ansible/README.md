@@ -50,7 +50,7 @@ This will:
 After setup, the server will be configured with:
 
 - **Server Public Key:** `4utg8R6pINVXmF0EilIQx2LAtndqO0plkv2kdEwf3QE=`
-- **Server Endpoint:** `8.222.187.10:51820`
+- **Server Endpoint:** `8.222.187.10:54321`
 - **Server VPN IP:** `10.66.66.1`
 - **VPN Network:** `10.66.66.0/24`
 
@@ -161,13 +161,13 @@ ssh sg-vpn 'ss -uln | grep 51820'
 
 1. Verify server public key matches what client has
 2. Check client public key is added to server config
-3. Ensure firewall allows UDP 51820
+3. Ensure firewall allows UDP 54321
 4. Test from different network (some block UDP)
 
 ## Security Notes
 
 - Private keys are generated once and stored in `/etc/wireguard/keys/` with 600 permissions
-- Only SSH (22/tcp) and WireGuard (51820/udp) ports are open
+- Only SSH (22/tcp) and WireGuard (54321/udp) ports are open
 - UFW deny policy for all other incoming traffic
 - NAT rules only apply to VPN network (10.66.66.0/24)
 
