@@ -407,17 +407,14 @@ Each team posts a daily summary to SilverBullet wiki:
 
 ### Task Assignment Rules
 
-**Vikunja Labels:**
-- `backend` → Backend Engineer
-- `frontend` → Frontend Engineer
-- `devops` → DevOps Engineer
-- `product` → Product Manager
-- `marketing` → Sales & Marketing
-- `ai-research` → AI Researcher
-- `research` → Researcher & Data Analyst
-- `support` → Customer Support
-- `testing` → QA & Testing
-- `documentation` → Technical Writer
+**Vikunja Labels (match agent-launcher.sh role names):**
+- `backend-sde` → Backend Engineer (M4)
+- `frontend-sde` → Frontend Engineer (M4)
+- `devops` → DevOps Engineer (M2 Pro)
+- `qa-testing` → QA & Testing (M2 Pro)
+- `tech-writer` → Technical Writer (M2 Pro)
+- `urgent` → All agents (escalation)
+- `blocked` → Needs human intervention
 
 **Priority Mapping:**
 - Priority 5 (Critical): All agents available for escalation
@@ -444,65 +441,75 @@ Each team posts a daily summary to SilverBullet wiki:
 - Product Specs: Product Manager
 - Meeting Notes: Coordinators
 
-**Slack (Future):**
-- Real-time chat between agents
-- Alerts and notifications
-- Quick questions and clarifications
+**Discord (via OpenClaw):**
+- PM creates tasks via Discord messages
+- Agents send PR notifications to #agent-prs
+- Status queries via /status command in #agent-tasks
+- Deployment triggers via /deploy command
+- Alerts and escalations in #agent-alerts
 
 ---
 
 ## Agent Runtime Implementation
 
-Each agent runs as a separate process with:
+Each agent runs via `scripts/agent-launcher.sh` — a bash script that polls Vikunja and executes tasks using `claude -p` (Claude Code headless mode).
 
-1. **Task Poller:** Queries Vikunja for tasks matching agent's labels
-2. **Context Window:** Has access to:
-   - Relevant code repositories
-   - SilverBullet wiki pages
-   - MCP tools (Vikunja, Portainer, Grafana, etc.)
-   - Git history and GitHub issues
-3. **Execution Loop:**
-   - Pick highest-priority task
-   - Execute (code, analyze, write, deploy)
-   - Run local CI if applicable
-   - Update task status
-   - Create PR or commit results
-   - Log work to wiki
-4. **Error Handling:**
-   - Retry failed tasks (max 3 attempts)
-   - Escalate to coordinator if stuck
-   - Log errors to wiki for debugging
+### Architecture
 
-**Example Agent Process:**
+```
+agent-launcher.sh <role> <repo-path> [poll-interval]
+    │
+    ├── Poll: claude -p "Use vikunja_list_tasks to find tasks labeled '<role>'"
+    │
+    ├── Claim: claude -p "Use vikunja_update_task to set in-progress"
+    │
+    ├── Execute: claude -p "You are a <role>. Execute task: <description>..."
+    │   └── Uses: --allowedTools "Bash,Read,Edit,Write,Glob,Grep,mcp__*"
+    │   └── Uses: --append-system-prompt from agent-instructions/<role>.md
+    │
+    ├── Push: git push + gh pr create
+    │
+    ├── Update: claude -p "Use vikunja_update_task to mark done with PR URL"
+    │
+    └── Log: claude -p "Use silverbullet_update_page to log activity"
+```
+
+### Persistence
+
+Each agent runs as a macOS LaunchAgent (in `launchd/`):
+- Starts on login, restarts on failure
+- Logs to `~/logs/agent-<role>.log`
+- Polls every 2 minutes (configurable)
+
+### Role Instructions
+
+Each role has a dedicated instruction file in `agent-instructions/`:
+- `backend-sde.md` — Go conventions, sqlc, chi v5, test requirements
+- `frontend-sde.md` — Vue 3 Composition API, PrimeVue, Tailwind
+- `devops.md` — Docker Compose, Traefik, health checks, monitoring
+- `qa-testing.md` — Test coverage, security scanning, govulncheck
+- `tech-writer.md` — SilverBullet wiki, API docs, runbooks
+
+### Task Workflow
+
+1. Agent polls Vikunja → finds highest-priority open task with matching label
+2. Claims task (sets status to in-progress)
+3. Creates branch `agent/<role>/task-<id>`
+4. Runs `claude -p` with task description + role instructions + repo CLAUDE.md
+5. Agent implements, runs tests (`make test` / `npm run build`)
+6. Commits, pushes, creates PR via `gh pr create`
+7. Updates Vikunja task with PR URL, marks as done
+8. Logs summary to SilverBullet wiki "Agent Activity Log"
+
+### Starting Agents
 
 ```bash
-# Backend Engineer agent process
-~/workspace/agent-runtime/backend-engineer.sh
+# Manual (for testing)
+./scripts/agent-launcher.sh backend-sde ~/workspace/axinova-home-go 120
 
-# Pseudo-code:
-while true; do
-  task=$(vikunja_list_tasks --label=backend --status=open --sort=priority)
-
-  if [[ -n "$task" ]]; then
-    vikunja_update_task --id=$task_id --status=in_progress
-
-    # Work on task (call Claude API with context)
-    result=$(claude_agent \
-      --role="backend-engineer" \
-      --task="$task_description" \
-      --repo="/Users/weixia/axinova/axinova-home-go" \
-      --mcp-config="/Users/axinova-agent/.config/claude/config.json")
-
-    if [[ $? -eq 0 ]]; then
-      vikunja_update_task --id=$task_id --status=completed
-    else
-      vikunja_update_task --id=$task_id --status=blocked
-      # Escalate to coordinator
-    fi
-  fi
-
-  sleep 60  # Poll every minute
-done
+# Persistent (via launchd)
+cp launchd/com.axinova.agent-backend-sde.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.axinova.agent-backend-sde.plist
 ```
 
 ---
