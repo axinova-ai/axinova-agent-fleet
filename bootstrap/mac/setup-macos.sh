@@ -43,6 +43,14 @@ go install golang.org/x/vuln/cmd/govulncheck@latest
 go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
+# Step 3b: Install Claude Code CLI
+echo "→ Installing Claude Code CLI..."
+if ! command -v claude &>/dev/null; then
+  npm install -g @anthropic-ai/claude-code
+else
+  echo "  Claude Code already installed: $(claude --version)"
+fi
+
 # Step 4: Create axinova-agent user (if not exists)
 echo "→ Creating axinova-agent user..."
 if ! dscl . -read /Users/axinova-agent &>/dev/null; then
@@ -70,7 +78,6 @@ if [[ ! -f "$SUDOERS_FILE" ]]; then
   sudo tee "$SUDOERS_FILE" > /dev/null <<EOF
 # Axinova agent user - limited sudo permissions
 axinova-agent ALL=(ALL) NOPASSWD: /usr/bin/systemctl
-axinova-agent ALL=(ALL) NOPASSWD: /usr/sbin/wg-quick
 axinova-agent ALL=(ALL) NOPASSWD: /usr/bin/docker
 EOF
   sudo chmod 0440 "$SUDOERS_FILE"
@@ -95,6 +102,8 @@ echo "→ Go version: $(go version)"
 echo "→ Node version: $(node --version)"
 echo "→ Docker version: $(docker --version 2>/dev/null || echo 'Not running (start Docker Desktop)')"
 echo "→ GitHub CLI: $(gh --version | head -n1)"
+echo "→ Claude Code: $(claude --version 2>/dev/null || echo 'Not installed')"
+echo "→ tmux: $(tmux -V 2>/dev/null || echo 'Not installed')"
 
 echo ""
 echo "✅ Bootstrap complete!"
@@ -102,5 +111,6 @@ echo ""
 echo "Next steps:"
 echo "1. Switch to axinova-agent user: sudo -i -u axinova-agent"
 echo "2. Configure GitHub bot token: export GITHUB_TOKEN=<token>"
-echo "3. Set up WireGuard VPN: cd ~/workspace/axinova-agent-fleet/bootstrap/vpn && ./wireguard-install.sh"
-echo "4. Configure MCP server: cp config-example.json ~/.config/claude/config.json"
+echo "3. Import AmneziaWG config: cd ~/workspace/axinova-agent-fleet/bootstrap/vpn && ./amneziawg-setup.sh"
+echo "4. Configure Claude Code: export ANTHROPIC_API_KEY=<key> && claude auth login"
+echo "5. Copy MCP config: cp integrations/mcp/agent-mcp-config.json ~/.claude/settings.json"

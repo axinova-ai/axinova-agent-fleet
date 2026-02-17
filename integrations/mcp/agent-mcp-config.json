@@ -1,36 +1,35 @@
 {
   "mcpServers": {
     "axinova-tools": {
-      "command": "/Users/weixia/axinova/axinova-mcp-server-go/bin/axinova-mcp-server",
+      "command": "/Users/axinova-agent/workspace/axinova-mcp-server-go/bin/axinova-mcp-server",
       "env": {
         "ENV": "prod",
         "APP_PORTAINER__URL": "https://portainer.axinova-internal.xyz",
-        "APP_PORTAINER__TOKEN": "ptr_xxx",
+        "APP_PORTAINER__TOKEN": "${PORTAINER_TOKEN}",
         "APP_GRAFANA__URL": "https://grafana.axinova-internal.xyz",
-        "APP_GRAFANA__TOKEN": "glsa_xxx",
+        "APP_GRAFANA__TOKEN": "${GRAFANA_TOKEN}",
         "APP_PROMETHEUS__URL": "https://prometheus.axinova-internal.xyz",
         "APP_SILVERBULLET__URL": "https://wiki.axinova-internal.xyz",
-        "APP_SILVERBULLET__TOKEN": "sb_xxx",
+        "APP_SILVERBULLET__TOKEN": "${SILVERBULLET_TOKEN}",
         "APP_VIKUNJA__URL": "https://vikunja.axinova-internal.xyz",
-        "APP_VIKUNJA__TOKEN": "tk_xxx",
+        "APP_VIKUNJA__TOKEN": "${VIKUNJA_TOKEN}",
         "APP_REGISTRYUI__URL": "https://registry-ui.axinova-internal.xyz",
         "APP_TLS__SKIP_VERIFY": "true"
       }
     }
   },
-  "globalShortcut": "CommandOrControl+.",
-  "allowedPrompts": [
-    {
-      "tool": "Bash",
-      "prompt": "run tests"
-    },
-    {
-      "tool": "Bash",
-      "prompt": "build docker image"
-    },
-    {
-      "tool": "Bash",
-      "prompt": "push to git"
-    }
-  ]
+  "permissions": {
+    "allow": [
+      "Bash(run tests)",
+      "Bash(build docker image)",
+      "Bash(push to git)",
+      "Bash(go build)",
+      "Bash(npm run build)",
+      "Bash(make *)",
+      "Bash(gh pr create*)",
+      "Bash(gh pr view*)",
+      "Bash(git *)",
+      "mcp__axinova-tools__*"
+    ]
+  }
 }

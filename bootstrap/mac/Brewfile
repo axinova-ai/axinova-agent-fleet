@@ -17,8 +17,9 @@ brew "sops"            # Secrets management
 brew "1password-cli"   # 1Password CLI
 
 # Networking
-brew "wireguard-tools" # VPN to Singapore
+cask "amneziawg"       # AmneziaWG VPN client (replaces wireguard-tools)
 brew "mosh"            # Mobile shell for unstable connections
+brew "tmux"            # Persistent terminal sessions for agents
 
 # Go tooling
 # Note: These are installed via `go install` in setup script

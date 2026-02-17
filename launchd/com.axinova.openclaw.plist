@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.axinova.openclaw</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/openclaw</string>
+        <string>serve</string>
+    </array>
+    <key>UserName</key>
+    <string>axinova-agent</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/axinova-agent</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/axinova-agent</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>/Users/axinova-agent/logs/openclaw-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/axinova-agent/logs/openclaw-stderr.log</string>
+</dict>
+</plist>
