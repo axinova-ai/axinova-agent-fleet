@@ -22,8 +22,8 @@
 - axinova-deploy (dev/stage deployments)
 
 **GitHub Identity:**
-- Username: `axinova-agent1-bot`
-- Email: `agent1@axinova-ai.com`
+- Account: `harryxiaxia` (owner account)
+- Commit as: `Axinova M4 Agent <m4@axinova.local>`
 
 **Workflow:**
 1. Pick task from Vikunja (priority 4-5, label: delivery)
@@ -60,8 +60,8 @@
 - SilverBullet wiki
 
 **GitHub Identity:**
-- Username: `axinova-agent2-bot`
-- Email: `agent2@axinova-ai.com`
+- Account: `harryxiaxia` (owner account)
+- Commit as: `Axinova M2Pro Agent <m2pro@axinova.local>`
 
 **Workflow:**
 1. Pick task from Vikunja (priority 1-3, label: learning OR maintenance)
@@ -112,7 +112,7 @@
 - Agent1 creates PRs from `agent1/*` branches
 - Agent2 creates PRs from `agent2/*` branches
 - Use PR comments for clarifications
-- Tag each other with `@axinova-agent1-bot` or `@axinova-agent2-bot`
+- Use PR comments for cross-machine communication
 
 ---
 
@@ -168,7 +168,7 @@
 vikunja_update_task(task_id: 123, description: "Assigned to Agent1 for implementation")
 
 # Via GitHub issue
-gh issue edit 456 --add-assignee axinova-agent1-bot
+vikunja_update_task(task_id: 456, description: "Assigned to M4 backend-sde agent")
 ```
 
 ---

@@ -4,8 +4,8 @@ Fast track to getting the agent fleet operational.
 
 ## Prerequisites (5 minutes)
 
-1. **GitHub bot accounts created** ([guide](bootstrap/github/create-bot-account.md))
-2. **Bot tokens in 1Password** (names: "GitHub Bot Token - Agent1/2")
+1. **GitHub fine-grained PAT created** ([guide](bootstrap/github/create-bot-account.md))
+2. **PAT stored in 1Password** (name: "GitHub PAT - Agent Fleet")
 3. **Mac minis on network** (can ping m4-mini.local, m2-mini.local)
 
 ## Bootstrap Mac Mini (15 minutes per mini)
@@ -20,9 +20,8 @@ curl -fsSL https://raw.githubusercontent.com/axinova-ai/axinova-agent-fleet/main
 # Switch to agent user
 sudo -i -u axinova-agent
 
-# Configure GitHub
-cd ~/workspace/axinova-agent-fleet
-./bootstrap/github/setup-bot-token.sh 1  # Use 2 for Agent2
+# Configure GitHub (add SSH key from bootstrap output to github.com/settings/keys)
+gh auth login --with-token <<< "<PAT>"
 
 # Verify
 go version && node --version && docker --version && gh auth status

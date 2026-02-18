@@ -50,7 +50,7 @@ if [[ "$PUSH" == "true" ]]; then
   # Check if authenticated
   if ! docker info 2>/dev/null | grep -q "Username"; then
     echo "Error: Not authenticated to Docker registry"
-    echo "Run: echo \$GITHUB_TOKEN | docker login ghcr.io -u axinova-agent1-bot --password-stdin"
+    echo "Run: echo \$GITHUB_TOKEN | docker login ghcr.io -u harryxiaxia --password-stdin"
     exit 1
   fi
 

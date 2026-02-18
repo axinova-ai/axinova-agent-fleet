@@ -14,9 +14,8 @@ Last Updated: 2026-02-17
 
 ## Phase 0: Pre-flight Preparation (30 min)
 
-- [ ] Create GitHub bot account: `axinova-fleet-bot`
-  - [ ] Add to `axinova-ai` org as Member
-  - [ ] Fine-grained PAT: contents:write, pull_requests:write, issues:write, metadata:read
+- [ ] Create GitHub fine-grained PAT (from `harryxiaxia` account)
+  - [ ] Scopes: contents:write, pull_requests:write, issues:write, metadata:read
   - [ ] Store token in 1Password
 - [ ] Gather MCP tokens from 1Password (Portainer, Grafana, SilverBullet, Vikunja)
 - [ ] Create Discord bot via Developer Portal → save token
@@ -32,7 +31,7 @@ Last Updated: 2026-02-17
 - [ ] Physical setup, create admin user `weixia`, enable Remote Login + Screen Sharing
 - [ ] Run `bootstrap/mac/setup-macos.sh` (installs Homebrew, Go, Node, Docker, Claude Code, tmux)
 - [ ] Configure Claude Code: `export ANTHROPIC_API_KEY=<key> && claude auth login`
-- [ ] Configure GitHub: `gh auth login --with-token`, set git identity to `axinova-fleet-bot`
+- [ ] Configure GitHub: `gh auth login --with-token`, add machine SSH key to github.com/settings/keys
 - [ ] Copy MCP config to `~/.claude/settings.json` with actual tokens
 - [ ] Clone all `axinova-*` repos to `~/workspace/`
 
@@ -40,7 +39,7 @@ Last Updated: 2026-02-17
 - [ ] `claude --version` works
 - [ ] `claude -p "Use vikunja_list_projects"` returns data
 - [ ] `go version` → 1.24+, `node --version` → 22+, `docker --version` works
-- [ ] `gh auth status` → logged in as `axinova-fleet-bot`
+- [ ] `gh auth status` → logged in as `harryxiaxia`
 
 ---
 

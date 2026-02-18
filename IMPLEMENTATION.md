@@ -28,14 +28,17 @@ Step-by-step guide to deploy the agent fleet on two Mac minis.
 
 ## Phase 0: Pre-flight (from your laptop)
 
-### 0.1 Create GitHub bot account
+### 0.1 Create GitHub fine-grained PAT
 
-1. Create account with username `axinova-fleet-bot`
-2. Add to `axinova-ai` org as Member
-3. Create fine-grained PAT:
-   - Scopes: `contents:write`, `pull_requests:write`, `issues:write`, `metadata:read`
-   - Repos: all `axinova-*` repos
-4. Store token in 1Password vault "Axinova"
+Using your existing GitHub account (`harryxiaxia`):
+
+1. Go to https://github.com/settings/personal-access-tokens/new
+2. Token name: `Agent Fleet - M4` (create a second one for M2Pro later)
+3. Expiration: 1 year
+4. Resource owner: `axinova-ai`
+5. Repository access: All repositories (or select `axinova-*` repos)
+6. Permissions: `contents:write`, `pull_requests:write`, `issues:write`, `metadata:read`
+7. Store token in 1Password vault "Axinova"
 
 ### 0.2 Gather credentials
 
@@ -117,8 +120,9 @@ cd ~/workspace/axinova-mcp-server-go && make build
 
 ```bash
 gh auth login --with-token <<< "<PAT from 1Password>"
-git config --global user.name "Axinova Fleet Bot"
-git config --global user.email "fleet-bot@axinova-ai.com"
+# Git identity is set by setup-macos.sh automatically:
+#   M4:     "Axinova M4 Agent" <m4@axinova.local>
+#   M2 Pro: "Axinova M2Pro Agent" <m2pro@axinova.local>
 ```
 
 ### 1.6 Clone all repos
@@ -139,7 +143,7 @@ claude --version                          # Claude Code installed
 go version                                # Go 1.24+
 node --version                            # Node 22+
 docker --version                          # Docker works
-gh auth status                            # Logged in as axinova-fleet-bot
+gh auth status                            # Logged in as harryxiaxia
 claude -p "Use vikunja_list_projects"     # MCP works
 ```
 

@@ -1,40 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Configure GitHub bot token for agent
+# Configure GitHub authentication for agent machine
+# Uses your existing GitHub account with per-machine identity
 
-AGENT_NUM="${1:-1}"
-AGENT_NAME="axinova-agent${AGENT_NUM}-bot"
+echo "==> Setting up GitHub authentication"
 
-echo "==> Setting up GitHub authentication for $AGENT_NAME"
+HOSTNAME_SHORT=$(hostname -s | tr '[:upper:]' '[:lower:]')
 
-# Check if 1Password CLI is available
-if ! command -v op &>/dev/null; then
-  echo "Error: 1Password CLI not installed. Run: brew install --cask 1password-cli"
-  exit 1
+# Determine machine label
+if [[ "$HOSTNAME_SHORT" == *"m4"* ]]; then
+  MACHINE_LABEL="M4"
+elif [[ "$HOSTNAME_SHORT" == *"m2"* ]]; then
+  MACHINE_LABEL="M2Pro"
+else
+  MACHINE_LABEL="$HOSTNAME_SHORT"
 fi
 
-# Retrieve token from 1Password
-TOKEN_ITEM="GitHub Bot Token - Agent${AGENT_NUM}"
-echo "→ Retrieving token from 1Password vault..."
-
-if ! GITHUB_TOKEN=$(op item get "$TOKEN_ITEM" --fields password 2>/dev/null); then
-  echo "Error: Token not found in 1Password"
-  echo "Create it first with:"
-  echo "  op item create --category=password --title='$TOKEN_ITEM' --vault='Axinova' password='<token>'"
-  exit 1
+# Step 1: Ensure SSH key exists
+echo "→ Checking SSH key..."
+if [[ ! -f ~/.ssh/id_ed25519 ]]; then
+  echo "  Generating SSH key..."
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  ssh-keygen -t ed25519 -C "axinova-${MACHINE_LABEL,,}-agent" -f ~/.ssh/id_ed25519 -N ""
 fi
 
-# Configure git
-echo "→ Configuring git identity..."
-git config --global user.name "Axinova Agent ${AGENT_NUM} Bot"
-git config --global user.email "agent${AGENT_NUM}@axinova-ai.com"
+echo "  SSH public key (add to https://github.com/settings/keys):"
+echo ""
+cat ~/.ssh/id_ed25519.pub
+echo ""
 
-# Authenticate with GitHub CLI
-echo "→ Authenticating with GitHub CLI..."
-echo "$GITHUB_TOKEN" | gh auth login --with-token
+# Step 2: Authenticate GitHub CLI
+echo "→ Authenticating GitHub CLI..."
+echo "  Paste your fine-grained PAT (from https://github.com/settings/personal-access-tokens/new):"
+gh auth login --with-token
 
-# Verify authentication
+# Step 3: Verify
 echo ""
 echo "→ Verifying authentication..."
 if gh auth status; then
@@ -44,7 +45,12 @@ else
   exit 1
 fi
 
-# Test repo access
+# Step 4: Test SSH
+echo ""
+echo "→ Testing SSH access..."
+ssh -T git@github.com 2>&1 || true
+
+# Step 5: Test repo access
 echo ""
 echo "→ Testing repository access..."
 if gh repo list axinova-ai --limit 5; then
@@ -54,8 +60,7 @@ else
 fi
 
 echo ""
-echo "✅ GitHub bot setup complete for $AGENT_NAME"
+echo "✅ GitHub setup complete for $MACHINE_LABEL"
 echo ""
-echo "Environment variables to set in agent runtime:"
-echo "  export GITHUB_TOKEN=\$(op item get '$TOKEN_ITEM' --fields password)"
-echo "  export GITHUB_USER=$AGENT_NAME"
+echo "Git identity: $(git config user.name) <$(git config user.email)>"
+echo "Commits will show as: Axinova $MACHINE_LABEL Agent <${MACHINE_LABEL,,}@axinova.local>"

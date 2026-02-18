@@ -10,8 +10,8 @@ A complete local CI/CD infrastructure that avoids GitHub Actions minutes by runn
 axinova-agent-fleet/
 ├── bootstrap/          # Mac mini setup and configuration
 │   ├── mac/            # Homebrew, user creation, toolchain
-│   ├── vpn/            # WireGuard VPN to Singapore
-│   └── github/         # Bot account setup
+│   ├── vpn/            # AmneziaWG VPN to Singapore
+│   └── github/         # GitHub auth (SSH keys + PAT)
 ├── runners/            # CI and deployment orchestration
 │   ├── local-ci/       # Go, Vue, Docker CI scripts
 │   └── orchestration/  # Full-stack deployment
@@ -35,8 +35,8 @@ axinova-agent-fleet/
 **Scripts:**
 - `setup-macos.sh`: Complete Mac mini bootstrap (Homebrew, Go, Node, Docker)
 - `create-agent-user.sh`: Create isolated `axinova-agent` user
-- `wireguard-install.sh`: Configure VPN to Aliyun Singapore
-- `setup-bot-token.sh`: Configure GitHub bot authentication
+- `amneziawg-setup.sh`: Configure AmneziaWG VPN to Aliyun Singapore
+- `setup-bot-token.sh`: Configure GitHub auth (SSH key + PAT)
 
 **Usage:**
 ```bash
@@ -119,18 +119,18 @@ curl -fsSL https://raw.githubusercontent.com/.../setup-macos.sh | bash
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Agent1 (M4 Mac mini) - Delivery                            │
-│  - GitHub: axinova-agent1-bot                               │
+│  - GitHub: harryxiaxia (commits as "Axinova M4 Agent")      │
 │  - Repos: home-go/web, miniapp-builder-go/web, deploy      │
 │  - Tasks: Features, PRs, deployments                        │
-│  - Runtime: Anthropic SDK                                   │
+│  - Runtime: Claude Code CLI                                 │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
 │ Agent2 (M2 Pro Mac mini) - Learning & Stability            │
-│  - GitHub: axinova-agent2-bot                               │
+│  - GitHub: harryxiaxia (commits as "Axinova M2Pro Agent")   │
 │  - Repos: ai-lab-go, docs, tests (all repos)                │
 │  - Tasks: Experiments, docs, tests, maintenance             │
-│  - Runtime: OpenClaw + Anthropic SDK                        │
+│  - Runtime: Claude Code CLI + OpenClaw                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -197,7 +197,7 @@ Human review → Merge to main → GitHub Actions validate (1 run only)
 
 ### Phase 1: Foundation (Days 1-2)
 - ✅ Create GitHub repository
-- ✅ Create bot accounts (axinova-agent1-bot, axinova-agent2-bot)
+- ✅ Create GitHub fine-grained PATs (per-machine)
 - ✅ Bootstrap Mac minis (Homebrew, toolchain, users)
 - ✅ Configure SSH access
 
@@ -239,9 +239,9 @@ Human review → Merge to main → GitHub Actions validate (1 run only)
 - [ ] Docker Desktop running
 
 **GitHub Integration:**
-- [ ] Bot accounts created
+- [ ] GitHub PATs created (per-machine)
 - [ ] PATs stored in 1Password
-- [ ] Can create PRs from bot accounts
+- [ ] Can create PRs from agent machines
 - [ ] Branch protection on main
 
 **CI/CD:**
@@ -264,7 +264,7 @@ Human review → Merge to main → GitHub Actions validate (1 run only)
 ## Next Steps
 
 1. **Complete bootstrap:** Run setup scripts on both Mac minis
-2. **Create bot accounts:** Follow `bootstrap/github/create-bot-account.md`
+2. **Create GitHub PATs:** Follow `bootstrap/github/create-bot-account.md`
 3. **Configure VPN:** Set up WireGuard on Aliyun and clients
 4. **Update workflows:** Exclude agent branches in GitHub Actions
 5. **Test CI:** Run local CI scripts on sample repos

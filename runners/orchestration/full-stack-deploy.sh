@@ -41,7 +41,7 @@ else
     echo "Error: GITHUB_TOKEN not set"
     exit 1
   fi
-  echo "$GITHUB_TOKEN" | docker login ghcr.io -u "${GITHUB_USER:-axinova-agent1-bot}" --password-stdin
+  echo "$GITHUB_TOKEN" | docker login ghcr.io -u "${GITHUB_USER:-harryxiaxia}" --password-stdin
   docker push "ghcr.io/axinova-ai/${SERVICE}-go:$IMAGE_TAG"
 fi
 

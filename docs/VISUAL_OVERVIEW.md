@@ -141,7 +141,7 @@
 │               --body "Implements #123"                                   │
 │               --label "backend"                                          │
 │                                                                          │
-│  PR created by: axinova-agent1-bot                                       │
+│  PR created by: harryxiaxia (commit: Axinova M4 Agent)                   │
 │  Assigned to: Human for review                                           │
 └─────────────────────────────────────────────────────────────────────────┘
                                      │

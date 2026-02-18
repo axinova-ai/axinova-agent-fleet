@@ -2,17 +2,18 @@
 
 ## Attack Surface
 
-### 1. GitHub Bot Tokens
+### 1. GitHub PATs and SSH Keys
 
-**Risk:** Tokens grant write access to repositories
-- Attacker with token can push malicious code, create PRs, modify issues
+**Risk:** PATs and SSH keys grant write access to repositories
+- Attacker with token/key can push malicious code, create PRs, modify issues
 
 **Mitigations:**
-- Fine-grained PATs with minimal repository access
+- Fine-grained PATs with minimal repository access (per-machine)
 - Limited permissions (contents:write, PR:write, issues:write only)
 - 1-year expiration with calendar reminders
 - Stored in 1Password, never committed to git
-- Separate tokens for Agent1 and Agent2 (blast radius containment)
+- Per-machine SSH keys (revoke individually if compromised)
+- Single owner account (`harryxiaxia`) — no extra attack surface from bot accounts
 
 **Monitoring:**
 - GitHub audit log review (monthly)
@@ -114,21 +115,22 @@
 
 ## Attack Scenarios
 
-### Scenario 1: Stolen GitHub Bot Token
+### Scenario 1: Stolen GitHub PAT or SSH Key
 
-**Attack:** Attacker obtains Agent1 bot token from leaked env var
+**Attack:** Attacker obtains a machine's PAT or SSH key from leaked env var or disk access
 
 **Impact:**
-- Can push to allowed repos (home-go, home-web, miniapp-builder-go/web, deploy)
+- Can push to allowed repos under `harryxiaxia` account
 - Can create malicious PRs
-- Cannot merge to main (branch protection prevents bot from approving own PR)
+- Cannot merge to main (branch protection requires PR review)
 
 **Response:**
-1. Revoke token immediately on GitHub
-2. Generate new token with updated scopes
-3. Review recent commits from bot account (last 7 days)
-4. Audit git history for suspicious changes
-5. Rotate all secrets in SOPS-encrypted files
+1. Revoke PAT immediately on GitHub (Settings → Tokens)
+2. Remove SSH key from GitHub (Settings → SSH Keys)
+3. Generate new PAT and SSH key on affected machine
+4. Review recent commits from that machine's git identity (last 7 days)
+5. Audit git history for suspicious changes
+6. Rotate all secrets in SOPS-encrypted files
 
 **Prevention:**
 - Never log GITHUB_TOKEN in agent output
@@ -147,7 +149,7 @@
 **Response:**
 1. Disconnect Mac mini from network immediately
 2. Revoke SSH key from `~/.ssh/authorized_keys` on all systems
-3. Revoke GitHub bot token
+3. Revoke GitHub PAT and remove SSH key for that machine
 4. Review git history and infrastructure changes
 5. Re-image Mac mini from clean backup
 6. Rotate all secrets
@@ -191,7 +193,7 @@
 - [ ] Fine-grained PATs created with minimal scopes
 - [ ] Tokens stored in 1Password
 - [ ] Branch protection on `main` (require PR + review)
-- [ ] No bot accounts have admin permissions
+- [ ] PATs have minimal required permissions
 - [ ] Two-factor authentication enabled for all accounts
 
 ### Network Security

@@ -59,16 +59,39 @@ else
   echo "  User axinova-agent already exists"
 fi
 
-# Step 5: Set up SSH for axinova-agent
+# Step 5: Set up SSH keys and git identity for axinova-agent
 echo "→ Setting up SSH keys for axinova-agent..."
-sudo -u axinova-agent bash <<'EOF'
+HOSTNAME_SHORT=$(hostname -s | tr '[:upper:]' '[:lower:]')
+
+# Determine machine label from hostname
+if [[ "$HOSTNAME_SHORT" == *"m4"* ]]; then
+  MACHINE_LABEL="m4"
+  GIT_NAME="Axinova M4 Agent"
+  GIT_EMAIL="m4@axinova.local"
+elif [[ "$HOSTNAME_SHORT" == *"m2"* ]]; then
+  MACHINE_LABEL="m2pro"
+  GIT_NAME="Axinova M2Pro Agent"
+  GIT_EMAIL="m2pro@axinova.local"
+else
+  MACHINE_LABEL="$HOSTNAME_SHORT"
+  GIT_NAME="Axinova $HOSTNAME_SHORT Agent"
+  GIT_EMAIL="${HOSTNAME_SHORT}@axinova.local"
+fi
+
+sudo -u axinova-agent bash <<EOF
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
 if [[ ! -f ~/.ssh/id_ed25519 ]]; then
-  ssh-keygen -t ed25519 -C "axinova-agent@mac-mini" -f ~/.ssh/id_ed25519 -N ""
-  echo "  SSH public key:"
+  ssh-keygen -t ed25519 -C "axinova-${MACHINE_LABEL}-agent" -f ~/.ssh/id_ed25519 -N ""
+  echo "  SSH public key (add to github.com/settings/keys):"
   cat ~/.ssh/id_ed25519.pub
 else
   echo "  SSH key already exists"
 fi
+
+# Configure git identity for this machine
+git config --global user.name "$GIT_NAME"
+git config --global user.email "$GIT_EMAIL"
+echo "  Git identity: $GIT_NAME <$GIT_EMAIL>"
 EOF
 
 # Step 6: Configure sudoers for specific commands
@@ -109,8 +132,9 @@ echo ""
 echo "✅ Bootstrap complete!"
 echo ""
 echo "Next steps:"
-echo "1. Switch to axinova-agent user: sudo -i -u axinova-agent"
-echo "2. Configure GitHub bot token: export GITHUB_TOKEN=<token>"
-echo "3. Import AmneziaWG config: cd ~/workspace/axinova-agent-fleet/bootstrap/vpn && ./amneziawg-setup.sh"
-echo "4. Configure Claude Code: export ANTHROPIC_API_KEY=<key> && claude auth login"
-echo "5. Copy MCP config: cp integrations/mcp/agent-mcp-config.json ~/.claude/settings.json"
+echo "1. Add the SSH public key above to https://github.com/settings/keys"
+echo "2. Switch to axinova-agent user: sudo -i -u axinova-agent"
+echo "3. Auth GitHub CLI: gh auth login --with-token <<< '<your-PAT>'"
+echo "4. Import AmneziaWG config: cd ~/workspace/axinova-agent-fleet/bootstrap/vpn && ./amneziawg-setup.sh"
+echo "5. Configure Claude Code: export ANTHROPIC_API_KEY=<key> && claude auth login"
+echo "6. Copy MCP config: cp integrations/mcp/agent-mcp-config.json ~/.claude/settings.json"

@@ -25,7 +25,7 @@ You (PM) ──► Discord ──► OpenClaw (M4) ──► Vikunja Task
         │  AmneziaWG VPN (10.66.66.2)                   │
         └───────────────────────────────────────────────┘
 
-Both machines → GitHub (axinova-fleet-bot) → PRs to axinova-ai org repos
+Both machines → GitHub (harryxiaxia + per-machine identity) → PRs to axinova-ai org repos
 Both machines → MCP → Vikunja, SilverBullet, Portainer, Grafana, Prometheus
 ```
 
@@ -73,8 +73,9 @@ sudo -i -u axinova-agent
 export ANTHROPIC_API_KEY=<key>
 claude auth login
 gh auth login --with-token <<< "<PAT>"
-git config --global user.name "Axinova Fleet Bot"
-git config --global user.email "fleet-bot@axinova-ai.com"
+# Git identity is set automatically by setup-macos.sh:
+#   M4:     "Axinova M4 Agent" <m4@axinova.local>
+#   M2 Pro: "Axinova M2Pro Agent" <m2pro@axinova.local>
 ```
 
 ### 4. Start Agents
@@ -95,7 +96,7 @@ agent-instructions/     # Role-specific Claude system prompts
 bootstrap/
   mac/                  # Mac mini setup (Homebrew, users, tools)
   vpn/                  # AmneziaWG VPN setup
-  github/               # GitHub bot account setup
+  github/               # GitHub auth setup (SSH keys + PAT)
 scripts/
   agent-launcher.sh     # Core: polls Vikunja, runs claude -p
   fleet-status.sh       # Check fleet health
