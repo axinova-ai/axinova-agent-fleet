@@ -4,10 +4,11 @@ Step-by-step guide to deploy the agent fleet on two Mac minis.
 
 ## Prerequisites
 
-- Two Mac minis (M4 24GB + M2 Pro 32GB)
+- Two Mac minis (M4 16GB + M2 Pro 16GB)
 - GitHub organization admin access (axinova-ai)
-- Anthropic API key
-- 1Password with MCP tokens (Portainer, Grafana, SilverBullet, Vikunja)
+- OpenAI account (for Codex CLI auth)
+- Moonshot API key (for Kimi K2.5 via OpenClaw)
+- MCP tokens (Portainer, Grafana, SilverBullet, Vikunja)
 - AmneziaWG configs already generated (in `vpn-distribution/configs/macos/`)
 
 ## Timeline
@@ -95,14 +96,13 @@ cd ~/workspace/axinova-agent-fleet/bootstrap/mac
 ./setup-macos.sh
 ```
 
-This installs: Homebrew, Go, Node, Docker, gh CLI, Claude Code, tmux, jq, AmneziaWG.
+This installs: Homebrew, Go, Node, Docker, gh CLI, Codex CLI, Claude Code, tmux, jq, AmneziaWG.
 
-### 1.3 Configure Claude Code
+### 1.3 Configure Codex CLI (Agent Runtime)
 
 ```bash
-sudo -i -u axinova-agent
-export ANTHROPIC_API_KEY=<key from 1Password>
-claude auth login
+# Codex CLI first-run auth (OpenAI login)
+codex  # Follow prompts to authenticate with OpenAI
 ```
 
 ### 1.4 Configure MCP
@@ -139,12 +139,12 @@ done
 ### 1.7 Verify
 
 ```bash
-claude --version                          # Claude Code installed
+codex --version                           # Codex CLI installed
 go version                                # Go 1.24+
 node --version                            # Node 22+
-docker --version                          # Docker works
 gh auth status                            # Logged in as harryxiaxia
-claude -p "Use vikunja_list_projects"     # MCP works
+curl -sf -H "Authorization: Bearer $APP_VIKUNJA__TOKEN" \
+  "$APP_VIKUNJA__URL/api/v1/projects" | jq '.[].title'  # Vikunja API works
 ```
 
 ---
@@ -243,7 +243,7 @@ cd ~/workspace/axinova-agent-fleet/openclaw
 
 During onboarding, select **Discord** as the messaging platform and provide:
 - Discord bot token (from Phase 0.3)
-- Anthropic API key
+- Moonshot API key (for Kimi K2.5)
 
 ### 4.3 Verify
 
@@ -292,7 +292,7 @@ For all repos, configure `main` branch:
 
 ### Agent not picking up tasks
 1. Check logs: `tail -f ~/logs/agent-<role>.log`
-2. Verify Vikunja connectivity: `claude -p "Use vikunja_list_tasks"`
+2. Verify Vikunja API: `curl -sf -H "Authorization: Bearer $APP_VIKUNJA__TOKEN" "$APP_VIKUNJA__URL/api/v1/projects" | jq '.[].title'`
 3. Check launchd status: `launchctl list | grep axinova`
 4. Restart agent: `launchctl kickstart -k gui/$(id -u)/com.axinova.agent-<role>`
 
@@ -305,7 +305,7 @@ For all repos, configure `main` branch:
 ### MCP tools not working
 1. Verify binary exists: `ls ~/workspace/axinova-mcp-server-go/bin/axinova-mcp-server`
 2. Check tokens in `~/.claude/settings.json`
-3. Test directly: `claude -p "Use vikunja_list_projects"`
+3. Test directly: `curl -sf -H "Authorization: Bearer $APP_VIKUNJA__TOKEN" "$APP_VIKUNJA__URL/api/v1/projects" | jq`
 
 ### PR creation fails
 1. Check GitHub auth: `gh auth status`

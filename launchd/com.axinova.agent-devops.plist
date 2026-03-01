@@ -6,21 +6,25 @@
     <string>com.axinova.agent-devops</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/axinova-agent/workspace/axinova-agent-fleet/scripts/agent-launcher.sh</string>
+        <string>/Users/focusagent02/workspace/axinova-agent-fleet/scripts/agent-launcher.sh</string>
         <string>devops</string>
-        <string>/Users/axinova-agent/workspace</string>
+        <string>/Users/focusagent02/workspace</string>
         <string>120</string>
     </array>
     <key>UserName</key>
-    <string>axinova-agent</string>
+    <string>focusagent02</string>
     <key>WorkingDirectory</key>
-    <string>/Users/axinova-agent/workspace</string>
+    <string>/Users/focusagent02/workspace</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
-        <string>/Users/axinova-agent</string>
+        <string>/Users/focusagent02</string>
+        <key>APP_VIKUNJA__URL</key>
+        <string>https://vikunja.axinova-internal.xyz</string>
+        <key>APP_VIKUNJA__TOKEN</key>
+        <string>tk_c92243afb12553b93ee222f1f6c242fb0b746800</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -32,8 +36,8 @@
     <key>ThrottleInterval</key>
     <integer>60</integer>
     <key>StandardOutPath</key>
-    <string>/Users/axinova-agent/logs/agent-devops-stdout.log</string>
+    <string>/Users/focusagent02/logs/agent-devops-stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/axinova-agent/logs/agent-devops-stderr.log</string>
+    <string>/Users/focusagent02/logs/agent-devops-stderr.log</string>
 </dict>
 </plist>

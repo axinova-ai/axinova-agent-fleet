@@ -18,6 +18,7 @@ brew "1password-cli"   # 1Password CLI
 
 # Networking
 cask "amneziawg"       # AmneziaWG VPN client (replaces wireguard-tools)
+cask "tailscale"       # Tailscale mesh VPN for remote access
 brew "mosh"            # Mobile shell for unstable connections
 brew "tmux"            # Persistent terminal sessions for agents
 

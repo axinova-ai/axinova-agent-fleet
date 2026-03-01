@@ -43,7 +43,14 @@ go install golang.org/x/vuln/cmd/govulncheck@latest
 go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
-# Step 3b: Install Claude Code CLI
+# Step 3b: Install Codex CLI (agent runtime) + Claude Code CLI (human review)
+echo "→ Installing Codex CLI..."
+if ! command -v codex &>/dev/null; then
+  npm install -g @openai/codex
+else
+  echo "  Codex CLI already installed: $(codex --version)"
+fi
+
 echo "→ Installing Claude Code CLI..."
 if ! command -v claude &>/dev/null; then
   npm install -g @anthropic-ai/claude-code

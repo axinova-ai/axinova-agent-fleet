@@ -5,27 +5,33 @@ Multi-agent team infrastructure running on two Mac minis for autonomous software
 ## Architecture
 
 ```
-You (PM) ──► Discord ──► OpenClaw (M4) ──► Vikunja Task
-                                                │
-                         ┌──────────────────────┘
-                         ▼
-        ┌─ M4 Mac Mini (24GB) ─────────────────────────┐
-        │  Agent Launcher (polling Vikunja)              │
-        │  ├── Backend SDE  (claude -p on *-go repos)   │
-        │  ├── Frontend SDE (claude -p on *-web repos)  │
-        │  MCP Server → Vikunja, SilverBullet, etc.     │
-        │  AmneziaWG VPN (10.66.66.3)                   │
-        └───────────────────────────────────────────────┘
-                         │ Thunderbolt Bridge
-        ┌─ M2 Pro Mac Mini (32GB) ─────────────────────┐
-        │  Agent Launcher (polling Vikunja)              │
-        │  ├── DevOps/QA   (deploys, tests, monitoring) │
-        │  ├── Tech Writer (docs, runbooks)             │
-        │  MCP Server → same tools                      │
-        │  AmneziaWG VPN (10.66.66.2)                   │
-        └───────────────────────────────────────────────┘
+You (PM) ──► Discord ──► OpenClaw (M4, Kimi K2.5) ──► Vikunja Task
+                                                            │
+                              ┌─────────────────────────────┘
+                              ▼
+        ┌─ M4 Mac Mini (agent01, 16GB) ───────────────────────┐
+        │  Agent Launcher (polling Vikunja via API)             │
+        │  ├── Backend SDE  (Codex CLI on *-go repos)          │
+        │  ├── Frontend SDE (Codex CLI on *-web repos)         │
+        │  OpenClaw (Kimi K2.5 → task routing)                 │
+        │  AmneziaWG VPN (10.66.66.3)                          │
+        └──────────────────────────────────────────────────────┘
+                              │ Thunderbolt Bridge (10.10.10.x)
+        ┌─ M2 Pro Mac Mini (focusagent02, 16GB) ──────────────┐
+        │  Agent Launcher (polling Vikunja via API)             │
+        │  ├── DevOps/QA   (Codex CLI)                         │
+        │  ├── Tech Writer (Codex CLI)                         │
+        │  Ollama LLM Server (Qwen 2.5 7B, Gemma 3 4B)        │
+        │  AmneziaWG VPN (10.66.66.2)                          │
+        └──────────────────────────────────────────────────────┘
 
-Both machines → GitHub (harryxiaxia + per-machine identity) → PRs to axinova-ai org repos
+LLM Strategy (native CLIs, no abstraction layers):
+  Routing:  Kimi K2.5 (Moonshot) → OpenClaw native on M4
+  Coding:   Codex CLI (OpenAI)   → primary autonomous agent on both machines
+  Simple:   Qwen/Gemma (Ollama)  → routine tasks on M2 Pro (future)
+  Review:   Claude Code (human)  → PR review + merge on MacBook Air
+
+Both machines → GitHub (harryxiaxia) → PRs to axinova-ai org repos
 Both machines → MCP → Vikunja, SilverBullet, Portainer, Grafana, Prometheus
 ```
 
@@ -42,12 +48,20 @@ Both machines → MCP → Vikunja, SilverBullet, Portainer, Grafana, Prometheus
 
 ## How It Works
 
-1. You send a task via Discord → OpenClaw → Vikunja
-2. Agent launcher polls Vikunja every 2 min, picks up tasks matching its role label
-3. Agent runs `claude -p` with role-specific instructions in the target repo
-4. Agent implements, tests, commits, pushes, creates PR
-5. Updates Vikunja task, logs to SilverBullet wiki
-6. You review PR on GitHub, approve, merge
+1. You send a task via Discord → OpenClaw (Kimi K2.5) → Vikunja task
+2. Agent launcher polls Vikunja API every 2 min, picks up tasks matching its role label
+3. Agent runs Codex CLI (`codex --approval-mode full-auto`) with role-specific instructions
+4. Agent implements, tests, commits, pushes branch, creates PR via `gh`
+5. Updates Vikunja task as done, notifies Discord
+6. You review PR with Claude Code on MacBook, approve, merge
+
+## Prerequisites
+
+- Go 1.24+
+- Node.js 22+
+- Docker
+- Ollama
+- AmneziaWG VPN client
 
 ## Quick Start
 
@@ -66,14 +80,16 @@ cd ~/workspace/axinova-agent-fleet/bootstrap/vpn
 ./amneziawg-setup.sh
 ```
 
-### 3. Configure Claude Code + GitHub
+### 3. Configure Codex CLI + GitHub
 
 ```bash
-sudo -i -u axinova-agent
-export ANTHROPIC_API_KEY=<key>
-claude auth login
+# Codex CLI auth (OpenAI login)
+codex  # First run prompts for OpenAI auth
+
+# GitHub auth
 gh auth login --with-token <<< "<PAT>"
-# Git identity is set automatically by setup-macos.sh:
+
+# Git identity (set during bootstrap):
 #   M4:     "Axinova M4 Agent" <m4@axinova.local>
 #   M2 Pro: "Axinova M2Pro Agent" <m2pro@axinova.local>
 ```
@@ -92,17 +108,17 @@ launchctl load ~/Library/LaunchAgents/com.axinova.agent-*.plist
 ## Repository Structure
 
 ```
-agent-instructions/     # Role-specific Claude system prompts
+agent-instructions/     # Role-specific prompts for Codex CLI
 bootstrap/
-  mac/                  # Mac mini setup (Homebrew, users, tools)
+  mac/                  # Mac mini setup (Homebrew, tools)
   vpn/                  # AmneziaWG VPN setup
   github/               # GitHub auth setup (SSH keys + PAT)
 scripts/
-  agent-launcher.sh     # Core: polls Vikunja, runs claude -p
+  agent-launcher.sh     # Core: polls Vikunja API, runs Codex CLI
   fleet-status.sh       # Check fleet health
 launchd/                # macOS LaunchAgent plists for persistence
-openclaw/               # OpenClaw + Discord setup
-integrations/mcp/       # MCP server config for Claude Code
+openclaw/               # OpenClaw + Discord setup (Kimi K2.5)
+integrations/mcp/       # MCP server config
 runners/                # Local CI (Go, Vue, Docker) + deployment
 docs/                   # Agent teams, runbooks, architecture
 ```
@@ -112,8 +128,8 @@ docs/                   # Agent teams, runbooks, architecture
 - **VPN:** AmneziaWG (DPI-resistant) to Singapore server (8.222.187.10:54321)
 - **Auth:** Fine-grained GitHub PAT, stored in 1Password
 - **Secrets:** SOPS + age encryption
-- **Isolation:** Dedicated `axinova-agent` user with restricted sudo
-- **Network:** Thunderbolt bridge between minis (169.254.100.0/24)
+- **Isolation:** Dedicated agent users (`agent01`, `focusagent02`)
+- **Network:** Thunderbolt bridge between minis (10.10.10.0/24), Tailscale mesh
 
 ## Documentation
 

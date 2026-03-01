@@ -452,26 +452,26 @@ Each team posts a daily summary to SilverBullet wiki:
 
 ## Agent Runtime Implementation
 
-Each agent runs via `scripts/agent-launcher.sh` — a bash script that polls Vikunja and executes tasks using `claude -p` (Claude Code headless mode).
+Each agent runs via `scripts/agent-launcher.sh` — a bash script that polls Vikunja via direct HTTP API and executes coding tasks using Codex CLI (OpenAI native).
 
 ### Architecture
 
 ```
 agent-launcher.sh <role> <repo-path> [poll-interval]
     │
-    ├── Poll: claude -p "Use vikunja_list_tasks to find tasks labeled '<role>'"
+    ├── Poll: curl Vikunja API → find tasks with matching role label
     │
-    ├── Claim: claude -p "Use vikunja_update_task to set in-progress"
+    ├── Claim: curl Vikunja API → set percent_done=0.5
     │
-    ├── Execute: claude -p "You are a <role>. Execute task: <description>..."
-    │   └── Uses: --allowedTools "Bash,Read,Edit,Write,Glob,Grep,mcp__*"
-    │   └── Uses: --append-system-prompt from agent-instructions/<role>.md
+    ├── Execute: codex --quiet --approval-mode full-auto --model codex-mini
+    │   └── Prompt includes: role instructions from agent-instructions/<role>.md
+    │   └── Runs in target repo directory
     │
-    ├── Push: git push + gh pr create
+    ├── Push: git push -u origin agent/<role>/task-<id>
     │
-    ├── Update: claude -p "Use vikunja_update_task to mark done with PR URL"
+    ├── PR: gh pr create with task details
     │
-    └── Log: claude -p "Use silverbullet_update_page to log activity"
+    └── Done: curl Vikunja API → mark task done with PR URL
 ```
 
 ### Persistence
@@ -495,7 +495,7 @@ Each role has a dedicated instruction file in `agent-instructions/`:
 1. Agent polls Vikunja → finds highest-priority open task with matching label
 2. Claims task (sets status to in-progress)
 3. Creates branch `agent/<role>/task-<id>`
-4. Runs `claude -p` with task description + role instructions + repo CLAUDE.md
+4. Runs Codex CLI with task description + role instructions
 5. Agent implements, runs tests (`make test` / `npm run build`)
 6. Commits, pushes, creates PR via `gh pr create`
 7. Updates Vikunja task with PR URL, marks as done
@@ -556,7 +556,7 @@ launchctl load ~/Library/LaunchAgents/com.axinova.agent-backend-sde.plist
 
 **Overall Fleet Metrics:**
 - GitHub Actions minutes saved
-- Cost per task (Anthropic API usage)
+- Cost per task (OpenAI Codex API usage)
 - Human intervention rate (% of tasks needing escalation)
 - ROI (value delivered vs. cost)
 
