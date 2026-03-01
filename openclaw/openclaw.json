@@ -1,0 +1,51 @@
+{
+  "$schema": "https://docs.openclaw.ai/schema/config.json",
+  "gateway": {
+    "channels": {
+      "discord": {
+        "token": "${DISCORD_BOT_TOKEN}",
+        "allowedGuilds": ["${DISCORD_SERVER_ID}"],
+        "allowedChannels": ["${DISCORD_CHANNEL_TASKS}"]
+      }
+    },
+    "pairing": {
+      "allowedUsers": ["${DISCORD_USER_ID}"]
+    }
+  },
+  "agents": {
+    "task-router": {
+      "description": "Routes Discord messages to Vikunja tasks with auto-labeling",
+      "model": "moonshot/kimi-k2.5",
+      "providers": {
+        "moonshot": {
+          "baseUrl": "https://api.moonshot.ai/v1",
+          "apiKey": "${MOONSHOT_API_KEY}",
+          "api": "openai-completions"
+        }
+      },
+      "systemPromptFile": "./task-router-prompt.md",
+      "bindings": [
+        {
+          "channel": "discord",
+          "channelFilter": ["${DISCORD_CHANNEL_TASKS}"]
+        }
+      ],
+      "tools": {
+        "mcp": {
+          "axinova-tools": {
+            "include": [
+              "vikunja_list_projects",
+              "vikunja_list_tasks",
+              "vikunja_get_task",
+              "vikunja_create_task",
+              "vikunja_update_task",
+              "vikunja_create_tasks"
+            ]
+          }
+        }
+      },
+      "maxTurns": 5,
+      "temperature": 0.2
+    }
+  }
+}

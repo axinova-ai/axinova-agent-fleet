@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "axinova-tools": {
-      "command": "/Users/axinova-agent/workspace/axinova-mcp-server-go/bin/axinova-mcp-server",
+      "command": "/Users/agent01/workspace/axinova-mcp-server-go/bin/axinova-mcp-server",
       "env": {
         "ENV": "prod",
         "APP_PORTAINER__URL": "https://portainer.axinova-internal.xyz",

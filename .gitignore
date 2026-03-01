@@ -58,3 +58,8 @@ dist/
 # Node.js
 node_modules/
 npm-debug.log
+
+# Discord credentials and webhook URLs
+discord-webhooks.env
+discord-bot.env
+openclaw.local.json

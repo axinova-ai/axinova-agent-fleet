@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Agent Launcher - Polls Vikunja for tasks and executes via Claude Code
+# Agent Launcher - Polls Vikunja for tasks and executes via Codex CLI
 # Usage: agent-launcher.sh <role> <repo-path> [poll-interval-seconds]
 #
 # Roles: backend-sde, frontend-sde, devops, qa, tech-writer
 # Example: agent-launcher.sh backend-sde ~/workspace/axinova-home-go 120
+#
+# LLM Strategy (native CLIs, no abstraction):
+#   - Codex CLI (OpenAI) → primary coding agent
+#   - Kimi K2.5 (via OpenClaw) → task routing
+#   - Ollama Qwen (local) → simple tasks (future)
 
 ROLE="${1:?Usage: agent-launcher.sh <role> <repo-path> [poll-interval]}"
 REPO_PATH="${2:?Usage: agent-launcher.sh <role> <repo-path> [poll-interval]}"
@@ -16,11 +21,45 @@ FLEET_DIR="$(dirname "$SCRIPT_DIR")"
 INSTRUCTIONS_DIR="$FLEET_DIR/agent-instructions"
 LOG_DIR="$HOME/logs"
 LOG_FILE="$LOG_DIR/agent-${ROLE}.log"
+MCP_BIN="$HOME/workspace/axinova-mcp-server-go/bin/axinova-mcp-server"
 
 mkdir -p "$LOG_DIR"
 
+# Load Discord webhook URLs
+DISCORD_WEBHOOKS_ENV="$HOME/.config/axinova/discord-webhooks.env"
+# shellcheck disable=SC1090
+[[ -f "$DISCORD_WEBHOOKS_ENV" ]] && source "$DISCORD_WEBHOOKS_ENV"
+
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$ROLE] $*" | tee -a "$LOG_FILE"
+}
+
+notify_discord() {
+  local webhook_url="$1"
+  local title="$2"
+  local description="$3"
+  local color="${4:-5814783}"  # Default: blue (0x58ACFF)
+  [[ -z "$webhook_url" ]] && return 0
+  curl -sf -H "Content-Type: application/json" \
+    -d "{\"embeds\":[{\"title\":\"$title\",\"description\":\"$description\",\"color\":$color,\"footer\":{\"text\":\"$ROLE | $(hostname -s)\"}}]}" \
+    "$webhook_url" >/dev/null 2>&1 || true
+}
+
+# Vikunja API helper (direct HTTP, no LLM needed for task management)
+VIKUNJA_URL="${APP_VIKUNJA__URL:-https://vikunja.axinova-internal.xyz}"
+VIKUNJA_TOKEN="${APP_VIKUNJA__TOKEN:-}"
+
+vikunja_api() {
+  local method="$1"
+  local endpoint="$2"
+  local data="${3:-}"
+  local args=(-sf -H "Authorization: Bearer $VIKUNJA_TOKEN" -H "Content-Type: application/json")
+  if [[ -n "$data" ]]; then
+    args+=(-X "$method" -d "$data")
+  elif [[ "$method" != "GET" ]]; then
+    args+=(-X "$method")
+  fi
+  curl "${args[@]}" "${VIKUNJA_URL}/api/v1${endpoint}" 2>/dev/null
 }
 
 # Validate role instruction file exists
@@ -40,27 +79,33 @@ REPO_NAME=$(basename "$REPO_PATH")
 log "Starting agent: role=$ROLE repo=$REPO_NAME poll=${POLL_INTERVAL}s"
 
 poll_for_task() {
-  # Use Claude to query Vikunja for tasks matching this role's label
-  local result
-  result=$(claude -p "Use the vikunja_list_tasks tool to find tasks in the 'Agent Fleet' project. \
-Filter for tasks that have the label '$ROLE' and are not done (status is open/in-progress). \
-Return ONLY a JSON object with fields: id, title, description, priority. \
-If no tasks found, return exactly: {\"id\": 0}. \
-Do not include any other text." \
-    --output-format json \
-    --max-turns 3 \
-    2>>"$LOG_FILE" || echo '{"id": 0}')
+  # Find the Agent Fleet project and get tasks with matching label
+  local projects tasks project_id
 
-  echo "$result"
+  projects=$(vikunja_api GET "/projects" 2>/dev/null) || { echo '{"id": 0}'; return; }
+  project_id=$(echo "$projects" | jq -r '.[] | select(.title == "Agent Fleet") | .id // empty' 2>/dev/null)
+
+  if [[ -z "$project_id" ]]; then
+    echo '{"id": 0}'
+    return
+  fi
+
+  tasks=$(vikunja_api GET "/projects/${project_id}/tasks?filter=done=false" 2>/dev/null) || { echo '{"id": 0}'; return; }
+
+  # Find first task with matching role label that isn't claimed
+  local task
+  task=$(echo "$tasks" | jq -r --arg role "$ROLE" '
+    [.[] | select(.labels != null and (.labels[].title == $role)) | select(.percent_done == 0)] | first // {"id": 0}
+  ' 2>/dev/null) || { echo '{"id": 0}'; return; }
+
+  echo "$task"
 }
 
 claim_task() {
   local task_id="$1"
   log "Claiming task #$task_id"
-  claude -p "Use vikunja_update_task to update task $task_id: set it to in-progress status. \
-Add a comment: 'Claimed by $ROLE agent on $(hostname -s)'" \
-    --max-turns 3 \
-    >>"$LOG_FILE" 2>&1 || true
+  vikunja_api POST "/tasks/${task_id}" \
+    "{\"percent_done\": 0.5}" >>"$LOG_FILE" 2>&1 || true
 }
 
 execute_task() {
@@ -103,14 +148,15 @@ $role_instructions
 - Keep changes focused on the task - don't refactor unrelated code
 - If tests fail, fix them before committing"
 
-  # Execute via Claude Code
-  local claude_output
-  claude_output=$(claude -p "$prompt" \
-    --allowedTools "Bash(make *),Bash(go *),Bash(npm *),Bash(git add*),Bash(git commit*),Read,Edit,Write,Glob,Grep,mcp__axinova-tools__*" \
-    --max-turns 30 \
+  # Execute via Codex CLI (OpenAI native)
+  local codex_output
+  codex_output=$(codex --quiet \
+    --approval-mode full-auto \
+    --model codex-mini \
+    "$prompt" \
     2>&1) || true
 
-  echo "$claude_output" >> "$LOG_FILE"
+  echo "$codex_output" >> "$LOG_FILE"
 
   # Check if there are commits to push
   local has_commits
@@ -126,7 +172,8 @@ $role_instructions
     local pr_url
     pr_url=$(gh pr create \
       --title "[$ROLE] Task #$task_id: $task_title" \
-      --body "## Task
+      --body "$(cat <<PRBODY
+## Task
 $task_description
 
 ## Agent
@@ -138,45 +185,39 @@ $task_description
 $(git log origin/main..$branch_name --pretty=format:'- %s' 2>/dev/null)
 
 ---
-Automated by Axinova Agent Fleet" \
+Automated by Axinova Agent Fleet
+PRBODY
+)" \
       --base main \
       2>>"$LOG_FILE") || true
 
     if [[ -n "$pr_url" ]]; then
       log "PR created: $pr_url"
-      # Update Vikunja task with PR URL
-      update_task_with_pr "$task_id" "$pr_url"
+      # Update Vikunja task as done
+      vikunja_api POST "/tasks/${task_id}" \
+        "{\"done\": true, \"description\": \"PR: ${pr_url}\"}" >>"$LOG_FILE" 2>&1 || true
+      # Notify Discord #agent-prs
+      notify_discord "${DISCORD_WEBHOOK_PRS:-}" \
+        "PR Created — Task #$task_id" \
+        "**$task_title**\\n$pr_url\\nRole: \`$ROLE\` | Repo: \`$REPO_NAME\`" \
+        5814783  # blue
     else
       log "WARNING: Failed to create PR for task #$task_id"
+      notify_discord "${DISCORD_WEBHOOK_ALERTS:-}" \
+        "PR Creation Failed — Task #$task_id" \
+        "**$task_title**\\nCommits exist but PR creation failed.\\nRepo: \`$REPO_NAME\` | Branch: \`$branch_name\`" \
+        16711680  # red
     fi
   else
     log "Task #$task_id: No commits made, marking as needs-review"
+    notify_discord "${DISCORD_WEBHOOK_ALERTS:-}" \
+      "No Changes — Task #$task_id" \
+      "**$task_title**\\nAgent completed but made no commits. May need manual review." \
+      16776960  # yellow
   fi
 
   # Switch back to main
   git checkout main 2>>"$LOG_FILE" || true
-}
-
-update_task_with_pr() {
-  local task_id="$1"
-  local pr_url="$2"
-
-  claude -p "Use vikunja_update_task to update task $task_id: \
-Add a comment with the PR URL: '$pr_url'. \
-Set the task status to done." \
-    --max-turns 3 \
-    >>"$LOG_FILE" 2>&1 || true
-}
-
-log_to_wiki() {
-  local task_id="$1"
-  local task_title="$2"
-  local status="$3"
-
-  claude -p "Use silverbullet_update_page to append to the 'Agent Activity Log' page. \
-Add a new entry: '- $(date '+%Y-%m-%d %H:%M') | $ROLE | Task #$task_id: $task_title | $status | $(hostname -s)'" \
-    --max-turns 3 \
-    >>"$LOG_FILE" 2>&1 || true
 }
 
 # Main polling loop
@@ -185,7 +226,7 @@ while true; do
 
   TASK_JSON=$(poll_for_task)
 
-  # Extract task ID (simple jq parse)
+  # Extract task ID
   TASK_ID=$(echo "$TASK_JSON" | jq -r '.id // 0' 2>/dev/null || echo "0")
 
   if [[ "$TASK_ID" != "0" && "$TASK_ID" != "null" && -n "$TASK_ID" ]]; then
@@ -195,8 +236,17 @@ while true; do
     log "Found task #$TASK_ID: $TASK_TITLE"
 
     claim_task "$TASK_ID"
+    notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
+      "Task Claimed — #$TASK_ID" \
+      "**$TASK_TITLE**\\nRole: \`$ROLE\` | Repo: \`$REPO_NAME\`" \
+      5814783  # blue
+
     execute_task "$TASK_ID" "$TASK_TITLE" "$TASK_DESC"
-    log_to_wiki "$TASK_ID" "$TASK_TITLE" "completed"
+
+    notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
+      "Task Complete — #$TASK_ID" \
+      "**$TASK_TITLE**\\nRole: \`$ROLE\` | Repo: \`$REPO_NAME\`" \
+      65280  # green
 
     log "Task #$TASK_ID complete, waiting ${POLL_INTERVAL}s before next poll"
   else

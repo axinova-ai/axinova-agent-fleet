@@ -1,142 +1,174 @@
 # Agent Fleet Implementation Progress
 
-Last Updated: 2026-02-17
+Last Updated: 2026-03-02
 
 ## Overview
 
-**Goal:** Two Mac minis running 5 specialized AI agents that autonomously handle software development via Claude Code CLI, coordinated through Vikunja tasks and Discord.
+**Goal:** Two Mac minis running 5 specialized AI agents that autonomously handle software development, coordinated through Vikunja tasks and Discord.
 
-**Timeline:** 6 phases over ~2 days (12 hours total), then continuous operation.
+**LLM Strategy (native CLIs, no abstraction layers):**
 
-**Current Status:** Phase 0-3 scripts ready, pending physical deployment.
+| Tier | Provider | CLI | Use Case |
+|------|----------|-----|----------|
+| Routing | Kimi K2.5 (Moonshot) | OpenClaw native | Task routing from Discord → Vikunja |
+| Coding | OpenAI Codex | `codex` CLI native | Primary autonomous coding agent |
+| Simple | Qwen 2.5 7B (Ollama) | Local inference | Routine tasks (docs, lints, simple fixes) |
+| Review | Claude (Anthropic) | `claude` CLI (human) | PR review + merge (human-in-the-loop) |
+
+**Machine Architecture:**
+
+| Machine | Role | Tools | Network |
+|---------|------|-------|---------|
+| MacBook Air (192.168.3.44) | Human dev | Claude Code (Pro Max) | Wi-Fi + Tailscale |
+| M4 Mac Mini (192.168.3.6, `agent01`) | Agent runner + OpenClaw | Codex CLI, OpenClaw + Kimi | Wi-Fi + Thunderbolt (10.10.10.2) + Tailscale (pending) |
+| M2 Pro Mac Mini (192.168.3.5, `focusagent02`) | LLM server + agents | Codex CLI, Ollama (Qwen) | Wi-Fi + Thunderbolt (10.10.10.1) + Tailscale (pending) |
+
+**Current Status:** Both machines bootstrapped. Codex CLI installed + authenticated. All repos cloned. Plists deployed but not loaded (blocked on Tailscale for Vikunja access). Docs updated for Codex CLI architecture.
 
 ---
 
-## Phase 0: Pre-flight Preparation (30 min)
+## Phase 0: Pre-flight Preparation
 
-- [ ] Create GitHub fine-grained PAT (from `harryxiaxia` account)
-  - [ ] Scopes: contents:write, pull_requests:write, issues:write, metadata:read
-  - [ ] Store token in 1Password
-- [ ] Gather MCP tokens from 1Password (Portainer, Grafana, SilverBullet, Vikunja)
-- [ ] Create Discord bot via Developer Portal → save token
-- [ ] Set up Vikunja project "Agent Fleet" with labels:
-  - `backend-sde` (green), `frontend-sde` (blue), `devops` (orange)
-  - `qa` (yellow), `docs` (purple), `urgent` (red), `blocked` (gray)
+- [x] Create GitHub fine-grained PAT (`axinova-gitops-agent`)
+  - [x] Scopes: contents:write, pull_requests:write, issues:write, metadata:read
+  - [x] Org-scoped PAT with access to all `axinova-ai/*` repos
+- [x] MCP tokens configured (Portainer, Grafana, SilverBullet, Vikunja) → deployed to both machines
+- [x] Create Discord bot via Developer Portal → save token
+- [x] Set up Discord channels (#agent-tasks, #agent-prs, #agent-alerts, #agent-logs)
+- [x] Set up Discord webhooks for agent notifications
+- [x] Set up Vikunja project "Agent Fleet" (id:13) with labels (backend-sde, frontend-sde, devops, qa, docs, urgent, blocked)
 
 ---
 
-## Phase 1: Mac Mini Bootstrap (2 hours)
+## Phase 1: Mac Mini Bootstrap
 
-### Per Machine
-- [ ] Physical setup, create admin user `weixia`, enable Remote Login + Screen Sharing
-- [ ] Run `bootstrap/mac/setup-macos.sh` (installs Homebrew, Go, Node, Docker, Claude Code, tmux)
-- [ ] Configure Claude Code: `export ANTHROPIC_API_KEY=<key> && claude auth login`
-- [ ] Configure GitHub: `gh auth login --with-token`, add machine SSH key to github.com/settings/keys
-- [ ] Copy MCP config to `~/.claude/settings.json` with actual tokens
-- [ ] Clone all `axinova-*` repos to `~/workspace/`
+### M4 Mac Mini (agent01@192.168.3.6)
+- [x] SSH key auth from MacBook Air
+- [x] Recon: macOS 26.2, arm64, 16GB RAM, 1.8TB disk
+- [x] Install Homebrew (USTC mirror for GFW)
+- [x] Install tools: go, node, git, gh, jq, yq, tmux, mosh, age, sops, python@3.12, pipenv
+- [x] Install Go tools: govulncheck, sqlc, migrate (via goproxy.cn)
+- [x] Install Claude Code CLI v2.1.49
+- [x] Install Codex CLI v0.106.0
+- [x] Git identity: `"Axinova M4 Agent" <m4@axinova.local>`
+- [x] SSH key: `ssh-ed25519 ...MvX0 axinova-m4-agent`
+- [x] GitHub auth: `gh auth login` as `harryxiaxia`
+- [x] Clone all 14 axinova-ai repos (org PAT)
+- [x] MCP config deployed to `~/.claude/settings.json` with real tokens
+- [x] MCP server built: `~/workspace/axinova-mcp-server-go/bin/axinova-mcp-server`
+- [x] AmneziaVPN installed + connected
+- [x] Codex CLI authenticated (OpenAI login)
+- [ ] Tailscale logged in (required for Vikunja access)
+
+### M2 Pro Mac Mini (focusagent02@192.168.3.5)
+- [x] SSH key auth from MacBook Air
+- [x] Recon: macOS 26.3, arm64, 16GB RAM, 460GB disk
+- [x] Install Homebrew (USTC mirror for GFW)
+- [x] Install tools: go, node, git, gh, jq, yq, tmux, mosh, age, sops, python@3.12, pipenv
+- [x] Install Go tools: govulncheck, sqlc, migrate (via goproxy.cn)
+- [x] Install Claude Code CLI v2.1.49
+- [x] Install Codex CLI v0.106.0
+- [x] Git identity: `"Axinova M2Pro Agent" <m2pro@axinova.local>`
+- [x] SSH key: `ssh-ed25519 ...2vb axinova-m2pro-agent`
+- [x] GitHub auth: `gh auth login` as `harryxiaxia` (org PAT)
+- [x] Install Ollama + pull Qwen 2.5 7B + Qwen 2.5 Coder 7B
+- [x] Ollama listening on 0.0.0.0:11434
+- [x] Clone all 14 axinova-ai repos (org PAT)
+- [x] MCP config deployed to `~/.claude/settings.json` with real tokens
+- [x] MCP server built: `~/workspace/axinova-mcp-server-go/bin/axinova-mcp-server`
+- [x] AmneziaVPN installed + connected
+- [x] Codex CLI authenticated (OpenAI login)
+- [ ] Tailscale logged in (required for Vikunja access)
+- [ ] Pull Gemma 3 4B (blocked by VPN IPv6 routing, defer to Tailscale)
 
 ### Verification Checklist
-- [ ] `claude --version` works
-- [ ] `claude -p "Use vikunja_list_projects"` returns data
-- [ ] `go version` → 1.24+, `node --version` → 22+, `docker --version` works
-- [ ] `gh auth status` → logged in as `harryxiaxia`
+- [x] `claude --version` works on both machines → v2.1.49
+- [x] `codex --version` works on both machines → v0.106.0
+- [x] `codex` auth (OpenAI login) on both machines ✓
+- [x] `go version` → 1.24+, `node --version` → 22+
+- [x] `gh auth status` → logged in as `harryxiaxia` on both
 
 ---
 
-## Phase 2: AmneziaWG VPN + Thunderbolt (1 hour)
+## Phase 2: Thunderbolt Bridge + VPN
 
-- [ ] Install AmneziaWG: `brew install --cask amneziawg`
-- [ ] Import configs from `vpn-distribution/configs/macos/`:
-  - M4: `m4-agent-1.conf` (10.66.66.3)
-  - M2 Pro: `m2-pro-agent-2.conf` (10.66.66.2)
-- [ ] Enable auto-connect on login in AmneziaWG app
-- [ ] Thunderbolt Bridge: M4=169.254.100.1/24, M2 Pro=169.254.100.2/24
-- [ ] Verify: ping VPN server (10.66.66.1), each other, internal services
+- [x] Thunderbolt Bridge: M4=10.10.10.2, M2 Pro=10.10.10.1 (sub-ms latency)
+- [x] Ollama on M2 Pro listening on 0.0.0.0:11434 (PlistBuddy fix + custom plist backup)
+- [x] M4 can reach Ollama via Thunderbolt: `curl http://10.10.10.1:11434/api/tags` ✓
+- [x] AmneziaVPN installed on both minis
+- [x] VPN configs imported and connected on both minis
+- [x] Moonshot API key saved on M4 (`~/.config/axinova/moonshot.env`)
+- [ ] **Tailscale setup on both minis** (required — Vikunja is only reachable via Tailscale mesh)
 
 ---
 
-## Phase 3: Agent Runtime (3 hours)
+## Phase 3: Agent Runtime
 
-- [x] Create `scripts/agent-launcher.sh` (Vikunja poller + claude -p executor)
-- [x] Create role instruction files in `agent-instructions/`:
-  - [x] `backend-sde.md`
-  - [x] `frontend-sde.md`
-  - [x] `devops.md`
-  - [x] `qa-testing.md`
-  - [x] `tech-writer.md`
-- [x] Create launchd plists in `launchd/` for all 5 agents + OpenClaw
-- [ ] Deploy to M4: backend-sde, frontend-sde agents
-- [ ] Deploy to M2 Pro: devops, qa, tech-writer agents
+- [x] Create `scripts/agent-launcher.sh` (Vikunja poller + Codex CLI executor)
+- [x] Rewrite agent-launcher.sh: direct Vikunja API (no LLM for task mgmt), Codex for coding
+- [x] Create role instruction files in `agent-instructions/`
+- [x] Create launchd plists for all 5 agents + OpenClaw
+- [x] Update plists: agent01 for M4, focusagent02 for M2 Pro
+- [x] Add Vikunja env vars to all plists
+- [x] Deploy plists to ~/Library/LaunchAgents on both machines
+- [x] Update docs (README, AGENT_TEAMS, IMPLEMENTATION) for Codex CLI architecture
+- [ ] **Load launchd agents** (blocked on Tailscale — Vikunja unreachable without it)
 - [ ] Test: create Vikunja task → agent picks up → PR created
 
 ---
 
-## Phase 4: OpenClaw + Discord (2 hours)
+## Phase 4: OpenClaw + Discord
 
 - [x] Create `openclaw/setup.sh`
+- [x] Update openclaw.json for Kimi K2.5 model
 - [ ] Install OpenClaw on M4
 - [ ] Connect Discord bot
-- [ ] Configure command routing (/task, /status, /deploy)
-- [ ] Set up Discord channel notifications (#agent-tasks, #agent-prs, #agent-alerts, #agent-logs)
 - [ ] Test: Discord message → Vikunja task → agent → PR → notification
 
 ---
 
-## Phase 5: GitHub & CI/CD Updates (1 hour)
+## Phase 5: GitHub & CI/CD Updates
 
 - [ ] Update CI workflows to exclude `agent/**` branches
-- [ ] Configure branch protection on `main` (require PR + 1 approval + CI)
+- [ ] Configure branch protection on `main`
 - [ ] Verify: agent branch push → no Actions, PR → CI runs
 
 ---
 
-## Phase 6: End-to-End Test (2 hours)
+## Phase 6: End-to-End Test
 
 - [ ] Full flow: Discord → Vikunja → agent → PR → review → merge → deploy
 - [ ] Success criteria:
   - Discord to PR: under 15 min
   - PR has tests, follows conventions
-  - No wasted GitHub Actions minutes
-  - Full audit trail in Vikunja + SilverBullet + GitHub
+  - Full audit trail
 
 ---
 
-## Files Changed (Feb 17, 2026)
+## Blockers
+
+| Blocker | Impact | Resolution |
+|---------|--------|------------|
+| **Tailscale not logged in on Mac Minis** | Vikunja API unreachable → agents can't poll tasks | Log in Tailscale on both machines (requires GUI) |
+| Gemma 3 4B download fails | Minor — Qwen 2.5 Coder 7B already installed as alternative | Retry after Tailscale is up |
+
+---
+
+## Files Changed (Mar 2, 2026)
 
 ### Modified
 | File | Change |
 |------|--------|
-| `bootstrap/mac/Brewfile` | amneziawg cask, tmux; removed wireguard-tools |
-| `bootstrap/mac/setup-macos.sh` | Claude Code install, updated next steps |
-| `integrations/mcp/agent-mcp-config.json` | Fixed path, token templates, permissions |
-| `README.md` | New architecture, AmneziaWG, agent workflow |
-| `PROGRESS.md` | Full rewrite with new 6-phase plan |
+| `README.md` | Updated architecture diagram for Codex CLI, Kimi K2.5, Tailscale |
+| `docs/AGENT_TEAMS.md` | Updated runtime section: claude -p → Codex CLI |
+| `IMPLEMENTATION.md` | Updated auth section, troubleshooting for Codex/Vikunja API |
+| `PROGRESS.md` | Full status update |
 
-### Created
-| File | Purpose |
-|------|---------|
-| `scripts/agent-launcher.sh` | Core polling + execution script |
-| `agent-instructions/backend-sde.md` | Backend SDE Claude instructions |
-| `agent-instructions/frontend-sde.md` | Frontend SDE Claude instructions |
-| `agent-instructions/devops.md` | DevOps Claude instructions |
-| `agent-instructions/qa-testing.md` | QA & Testing Claude instructions |
-| `agent-instructions/tech-writer.md` | Tech Writer Claude instructions |
-| `launchd/com.axinova.agent-backend-sde.plist` | macOS daemon |
-| `launchd/com.axinova.agent-frontend-sde.plist` | macOS daemon |
-| `launchd/com.axinova.agent-devops.plist` | macOS daemon |
-| `launchd/com.axinova.agent-qa.plist` | macOS daemon |
-| `launchd/com.axinova.agent-tech-writer.plist` | macOS daemon |
-| `launchd/com.axinova.openclaw.plist` | OpenClaw daemon |
-| `bootstrap/vpn/amneziawg-setup.sh` | AmneziaWG config import |
-| `openclaw/setup.sh` | OpenClaw + Discord setup |
-
-### Deleted
-| File | Reason |
-|------|--------|
-| `bootstrap/vpn/wireguard-install.sh` | Replaced by AmneziaWG |
-| `bootstrap/vpn/wg0.conf.template` | Old WireGuard template |
-| `bootstrap/vpn/connect-sg.sh` | Uses wg-quick, not needed with AmneziaWG app |
-| `integrations/mcp/mcp-client-example.go` | Claude Code has native MCP |
+### Deployed to Machines
+| Target | Files |
+|--------|-------|
+| M4 (agent01) | `com.axinova.agent-backend-sde.plist`, `com.axinova.agent-frontend-sde.plist` → ~/Library/LaunchAgents/ |
+| M2 Pro (focusagent02) | `com.axinova.agent-devops.plist`, `com.axinova.agent-qa.plist`, `com.axinova.agent-tech-writer.plist` → ~/Library/LaunchAgents/ |
 
 ---
 
@@ -144,8 +176,9 @@ Last Updated: 2026-02-17
 
 | Item | When |
 |------|------|
+| LiteLLM gateway on M2 Pro | After basic setup stable |
+| Gemma 3 4B model | After Tailscale stable |
 | AI Research agent | Month 2 |
 | Grafana agent dashboard | Month 2 |
 | Auto-merge for tests/docs | Month 2 |
 | Daily standup automation | Month 2 |
-| WhatsApp integration | Later |
