@@ -55,6 +55,17 @@ Both machines → MCP → Vikunja, SilverBullet, Portainer, Grafana, Prometheus
 5. Updates Vikunja task as done, notifies Discord
 6. You review PR with Claude Code on MacBook, approve, merge
 
+## Prerequisites
+
+- **macOS** 26.x on Apple Silicon (M2 Pro / M4)
+- **Go** 1.24+ and **Node.js** 22+
+- **Docker** (for local dev stacks)
+- **Ollama** (M2 Pro — local LLM inference)
+- **AmneziaWG** VPN client (for remote access)
+- **Homebrew** (package manager)
+- **gh** CLI (GitHub operations)
+- **Codex CLI** (OpenAI autonomous coding agent)
+
 ## Quick Start
 
 ### 1. Bootstrap Mac Mini
