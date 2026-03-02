@@ -5,29 +5,44 @@
       "discord": {
         "token": "${DISCORD_BOT_TOKEN}",
         "allowedGuilds": ["${DISCORD_SERVER_ID}"],
-        "allowedChannels": ["${DISCORD_CHANNEL_TASKS}"]
+        "allowedChannels": [
+          "${DISCORD_CHANNEL_TASKS}",
+          "${DISCORD_CHANNEL_STATUS}"
+        ]
       }
     },
     "pairing": {
       "allowedUsers": ["${DISCORD_USER_ID}"]
     }
   },
+  "providers": {
+    "moonshot": {
+      "baseUrl": "https://api.moonshot.cn/v1",
+      "apiKey": "${MOONSHOT_API_KEY}",
+      "api": "openai-completions"
+    },
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKey": "${OPENROUTER_API_KEY}",
+      "api": "openai-completions"
+    },
+    "ollama": {
+      "baseUrl": "${OLLAMA_HOST:-http://localhost:11434}/v1",
+      "apiKey": "ollama",
+      "api": "openai-completions"
+    }
+  },
   "agents": {
     "task-router": {
-      "description": "Routes Discord messages to Vikunja tasks with auto-labeling",
+      "description": "Routes Discord messages to Vikunja tasks, delegates to worker agents, handles /status and /assign commands",
       "model": "moonshot/kimi-k2.5",
-      "providers": {
-        "moonshot": {
-          "baseUrl": "https://api.moonshot.ai/v1",
-          "apiKey": "${MOONSHOT_API_KEY}",
-          "api": "openai-completions"
-        }
-      },
+      "provider": "moonshot",
+      "fallbackProviders": ["openrouter"],
       "systemPromptFile": "./task-router-prompt.md",
       "bindings": [
         {
           "channel": "discord",
-          "channelFilter": ["${DISCORD_CHANNEL_TASKS}"]
+          "channelFilter": ["${DISCORD_CHANNEL_TASKS}", "${DISCORD_CHANNEL_STATUS}"]
         }
       ],
       "tools": {
@@ -44,8 +59,53 @@
           }
         }
       },
-      "maxTurns": 5,
+      "maxTurns": 8,
       "temperature": 0.2
+    },
+    "backend-sde": {
+      "description": "Go microservices engineer - chi v5, sqlc, PostgreSQL",
+      "model": "moonshot/kimi-k2.5",
+      "provider": "moonshot",
+      "fallbackProviders": ["openrouter"],
+      "systemPromptFile": "../agent-instructions/backend-sde.md",
+      "maxTurns": 3,
+      "temperature": 0.1
+    },
+    "frontend-sde": {
+      "description": "Vue 3 + TypeScript + Tailwind frontend engineer",
+      "model": "moonshot/kimi-k2.5",
+      "provider": "moonshot",
+      "fallbackProviders": ["openrouter"],
+      "systemPromptFile": "../agent-instructions/frontend-sde.md",
+      "maxTurns": 3,
+      "temperature": 0.1
+    },
+    "devops": {
+      "description": "Docker Compose, Traefik, CI/CD, monitoring",
+      "model": "moonshot/kimi-k2.5",
+      "provider": "moonshot",
+      "fallbackProviders": ["openrouter"],
+      "systemPromptFile": "../agent-instructions/devops.md",
+      "maxTurns": 3,
+      "temperature": 0.1
+    },
+    "qa": {
+      "description": "Testing, security scanning, code quality",
+      "model": "moonshot/kimi-k2.5",
+      "provider": "moonshot",
+      "fallbackProviders": ["openrouter"],
+      "systemPromptFile": "../agent-instructions/qa-testing.md",
+      "maxTurns": 3,
+      "temperature": 0.1
+    },
+    "tech-writer": {
+      "description": "Documentation, wiki updates, runbooks",
+      "model": "qwen2.5-coder:7b",
+      "provider": "ollama",
+      "fallbackProviders": ["moonshot"],
+      "systemPromptFile": "../agent-instructions/tech-writer.md",
+      "maxTurns": 3,
+      "temperature": 0.3
     }
   }
 }

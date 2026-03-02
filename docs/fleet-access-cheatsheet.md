@@ -5,13 +5,13 @@ Quick reference for connecting to Mac mini agent nodes.
 ## SSH (Command Line)
 
 ```bash
-# Via LAN (same network)
-ssh agent01-lan          # M4 Mac mini (192.168.3.6)
-ssh agent02-lan          # M2 Pro Mac mini (192.168.3.5)
+# Default (LAN — use from home network)
+ssh agent01              # M4 Mac mini (192.168.3.6)
+ssh agent02              # M2 Pro Mac mini (192.168.3.5)
 
 # Via VPN (remote, requires AmneziaWG connected)
-ssh agent01              # M4 Mac mini (10.66.66.3)
-ssh agent02              # M2 Pro Mac mini (10.66.66.2)
+ssh agent01-vpn          # M4 Mac mini (10.66.66.3)
+ssh agent02-vpn          # M2 Pro Mac mini (10.66.66.2)
 ```
 
 These aliases are configured in `~/.ssh/config`. See [SSH Config](#ssh-config) below.
@@ -68,18 +68,8 @@ cd ~/axinova/axinova-agent-fleet
 Add to `~/.ssh/config` (already configured on Wei's MacBook):
 
 ```
-# M4 Mac mini (Agent1) - VPN
+# M4 Mac mini (Agent1) - default (LAN)
 Host agent01
-  HostName 10.66.66.3
-  User agent01
-  IdentityFile ~/.ssh/id_ed25519
-  IdentitiesOnly yes
-  ForwardAgent yes
-  ServerAliveInterval 60
-  ServerAliveCountMax 3
-
-# M4 Mac mini (Agent1) - LAN
-Host agent01-lan
   HostName 192.168.3.6
   User agent01
   IdentityFile ~/.ssh/id_ed25519
@@ -88,18 +78,19 @@ Host agent01-lan
   ServerAliveInterval 60
   ServerAliveCountMax 3
 
-# M2 Pro Mac mini (Agent2) - VPN
-Host agent02
-  HostName 10.66.66.2
-  User focusagent02
+# M4 Mac mini (Agent1) - VPN (via SG jump)
+Host agent01-vpn
+  HostName 10.66.66.3
+  User agent01
   IdentityFile ~/.ssh/id_ed25519
   IdentitiesOnly yes
   ForwardAgent yes
   ServerAliveInterval 60
   ServerAliveCountMax 3
+  ProxyJump sg-vpn
 
-# M2 Pro Mac mini (Agent2) - LAN
-Host agent02-lan
+# M2 Pro Mac mini (Agent2) - default (LAN)
+Host agent02
   HostName 192.168.3.5
   User focusagent02
   IdentityFile ~/.ssh/id_ed25519
@@ -107,6 +98,17 @@ Host agent02-lan
   ForwardAgent yes
   ServerAliveInterval 60
   ServerAliveCountMax 3
+
+# M2 Pro Mac mini (Agent2) - VPN (via SG jump)
+Host agent02-vpn
+  HostName 10.66.66.2
+  User focusagent02
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+  ForwardAgent yes
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+  ProxyJump sg-vpn
 ```
 
 ## Port Forwarding

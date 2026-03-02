@@ -8,7 +8,7 @@
     <array>
         <string>/Users/agent01/workspace/axinova-agent-fleet/scripts/agent-launcher.sh</string>
         <string>frontend-sde</string>
-        <string>/Users/agent01/workspace</string>
+        <string>/Users/agent01/workspace/axinova-home-web</string>
         <string>120</string>
     </array>
     <key>UserName</key>
@@ -22,9 +22,11 @@
         <key>HOME</key>
         <string>/Users/agent01</string>
         <key>APP_VIKUNJA__URL</key>
-        <string>https://vikunja.axinova-internal.xyz</string>
+        <string>http://localhost:3456</string>
         <key>APP_VIKUNJA__TOKEN</key>
         <string>tk_c92243afb12553b93ee222f1f6c242fb0b746800</string>
+        <key>OLLAMA_HOST</key>
+        <string>http://localhost:11434</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>

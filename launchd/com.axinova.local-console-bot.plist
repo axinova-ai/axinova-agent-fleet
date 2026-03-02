@@ -3,33 +3,36 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.axinova.openclaw</string>
+    <string>com.axinova.local-console-bot</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/agent01/workspace/axinova-agent-fleet/scripts/openclaw-start.sh</string>
+        <string>/Users/agent01/workspace/axinova-agent-fleet/scripts/local-console/local-console-start.sh</string>
     </array>
     <key>UserName</key>
     <string>agent01</string>
     <key>WorkingDirectory</key>
-    <string>/Users/agent01</string>
+    <string>/Users/agent01/workspace/axinova-agent-fleet/integrations/discord-local-console</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
         <string>/Users/agent01</string>
-        <key>OLLAMA_HOST</key>
+        <key>OLLAMA_BASE_URL</key>
         <string>http://localhost:11434</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
     <key>ThrottleInterval</key>
     <integer>30</integer>
     <key>StandardOutPath</key>
-    <string>/Users/agent01/logs/openclaw-stdout.log</string>
+    <string>/Users/agent01/logs/local-console-bot-stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/agent01/logs/openclaw-stderr.log</string>
+    <string>/Users/agent01/logs/local-console-bot-stderr.log</string>
 </dict>
 </plist>

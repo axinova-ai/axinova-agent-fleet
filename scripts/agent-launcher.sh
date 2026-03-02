@@ -773,11 +773,13 @@ This PR needs founder attention. Automatic retry limit reached." \
 check_pr_health() {
   cd "$REPO_PATH"
 
-  # List open PRs by this agent (no statusCheckRollup — PAT lacks checks scope)
-  local prs
-  prs=$(gh pr list --state open --head "agent/${ROLE}/" \
+  # List open PRs by this agent — gh --head requires exact branch, so filter with jq
+  local all_prs prs
+  all_prs=$(gh pr list --state open \
     --json number,title,headRefName,url,mergeable \
     2>/dev/null) || return 0
+  prs=$(echo "$all_prs" | jq --arg role "$ROLE" \
+    '[.[] | select(.headRefName | startswith("agent/"+$role+"/"))]' 2>/dev/null) || return 0
 
   local pr_count
   pr_count=$(echo "$prs" | jq 'length' 2>/dev/null || echo "0")

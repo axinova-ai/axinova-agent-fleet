@@ -7,23 +7,24 @@ Step-by-step guide to deploy the agent fleet on two Mac minis.
 - Two Mac minis (M4 16GB + M2 Pro 16GB)
 - GitHub organization admin access (axinova-ai)
 - OpenAI account (for Codex CLI auth)
-- Moonshot API key (for Kimi K2.5 via OpenClaw)
+- Moonshot API key (for Kimi K2.5 via OpenClaw + agent-launcher)
 - MCP tokens (Portainer, Grafana, SilverBullet, Vikunja)
 - AmneziaWG configs already generated (in `vpn-distribution/configs/macos/`)
 
 ## Timeline
 
-**Total: ~12 hours (2 days)**
+**Total: ~14 hours (2-3 days)**
 
 | Phase | Duration | Dependencies |
 |-------|----------|--------------|
 | Phase 0: Pre-flight | 30 min | None |
 | Phase 1: Bootstrap | 2 hours | Phase 0 |
 | Phase 2: VPN + Thunderbolt | 1 hour | Phase 1 |
-| Phase 3: Agent runtime | 3 hours | Phase 1, 2 |
-| Phase 4: OpenClaw + Discord | 2 hours | Phase 3 |
-| Phase 5: GitHub/CI updates | 1 hour | Phase 0 |
-| Phase 6: E2E test | 2 hours | All |
+| Phase 2.5: Multi-model agent runtime | 2 hours | Phase 2 |
+| Phase 3: Agent deployment | 2 hours | Phase 2.5 |
+| Phase 3.5: OpenClaw multi-agent | 2 hours | Phase 3 |
+| Phase 4: GitHub/CI updates | 1 hour | Phase 0 |
+| Phase 5: E2E test | 2 hours | All |
 
 ---
 
@@ -50,6 +51,7 @@ op item get "Portainer API Token" --fields password
 op item get "Grafana API Token" --fields password
 op item get "SilverBullet API Token" --fields password
 op item get "Vikunja API Token" --fields password
+op item get "Moonshot API Key" --fields password
 ```
 
 ### 0.3 Create Discord bot
@@ -182,19 +184,77 @@ curl -k https://vikunja.axinova-internal.xyz/api/v1/info
 
 ---
 
-## Phase 3: Agent Runtime
+## Phase 2.5: Multi-Model Agent Runtime
+
+### 2.5.1 Deploy secrets (both machines)
+
+```bash
+# On both Mac Minis:
+mkdir -p ~/.config/axinova && chmod 700 ~/.config/axinova
+
+# Moonshot API key (for Kimi K2.5)
+echo 'MOONSHOT_API_KEY=sk-...' > ~/.config/axinova/moonshot.env
+chmod 600 ~/.config/axinova/moonshot.env
+```
+
+### 2.5.2 Deploy updated agent-launcher.sh
+
+```bash
+# From your laptop to both machines
+scp scripts/agent-launcher.sh agent01@192.168.3.6:~/workspace/axinova-agent-fleet/scripts/
+scp scripts/agent-launcher.sh focusagent02@192.168.3.5:~/workspace/axinova-agent-fleet/scripts/
+```
+
+### 2.5.3 Deploy Ollama tunnel (M4 only)
+
+```bash
+# M4 needs Ollama tunnel to reach M2 Pro's Ollama via Thunderbolt
+scp launchd/com.axinova.ollama-tunnel.plist agent01@192.168.3.6:~/Library/LaunchAgents/
+ssh agent01@192.168.3.6 'launchctl load ~/Library/LaunchAgents/com.axinova.ollama-tunnel.plist'
+```
+
+### 2.5.4 Test multi-model execution
+
+```bash
+# On M4, test Kimi K2.5 API
+source ~/.config/axinova/moonshot.env
+curl -sf https://api.moonshot.cn/v1/models \
+  -H "Authorization: Bearer $MOONSHOT_API_KEY" | jq '.data[].id'
+
+# On M4, test Ollama via tunnel
+curl -sf http://localhost:11434/api/tags | jq '.models[].name'
+
+# On M2 Pro, test Ollama directly
+curl -sf http://localhost:11434/api/tags | jq '.models[].name'
+```
+
+### 2.5.5 Benchmark local models (optional)
+
+```bash
+# On M2 Pro
+cd ~/workspace/axinova-agent-fleet
+./scripts/benchmark-ollama.sh
+```
+
+---
+
+## Phase 3: Agent Deployment
 
 ### 3.1 Test agent launcher manually
 
 ```bash
-# On M4, as axinova-agent
+# On M4, as agent01
 cd ~/workspace/axinova-agent-fleet
 
-# Test with a backend task
+# Test with a backend task (will poll, select model, execute)
 ./scripts/agent-launcher.sh backend-sde ~/workspace/axinova-home-go 60
 ```
 
-Create a test task in Vikunja labeled `backend-sde` and verify the agent picks it up.
+Create a test task in Vikunja labeled `backend-sde` and verify:
+- Agent picks up the task
+- Vikunja comments appear (CLAIMED, STARTED, COMPLETED/BLOCKED)
+- Discord gets notified with rich embed
+- PR is created (if model produces valid changes)
 
 ### 3.2 Install launchd daemons
 
@@ -203,8 +263,10 @@ Create a test task in Vikunja labeled `backend-sde` and verify the agent picks i
 mkdir -p ~/Library/LaunchAgents ~/logs
 cp launchd/com.axinova.agent-backend-sde.plist ~/Library/LaunchAgents/
 cp launchd/com.axinova.agent-frontend-sde.plist ~/Library/LaunchAgents/
+cp launchd/com.axinova.ollama-tunnel.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.axinova.agent-backend-sde.plist
 launchctl load ~/Library/LaunchAgents/com.axinova.agent-frontend-sde.plist
+launchctl load ~/Library/LaunchAgents/com.axinova.ollama-tunnel.plist
 ```
 
 **On M2 Pro Mac Mini:**
@@ -225,35 +287,54 @@ launchctl load ~/Library/LaunchAgents/com.axinova.agent-tech-writer.plist
 launchctl list | grep axinova
 
 # Check logs
-tail -f ~/logs/agent-backend-sde.log
+tail -f ~/logs/agent-backend-sde-stdout.log
+
+# Check fleet status (from laptop)
+./scripts/fleet-status.sh
 ```
 
 ---
 
-## Phase 4: OpenClaw + Discord
+## Phase 3.5: OpenClaw Multi-Agent + Discord
 
-### 4.1 Install on M4
+### 3.5.1 Install OpenClaw on M4
+
+```bash
+ssh agent01@192.168.3.6
+npm install -g openclaw@latest
+```
+
+### 3.5.2 Run setup
 
 ```bash
 cd ~/workspace/axinova-agent-fleet/openclaw
 ./setup.sh
 ```
 
-### 4.2 Configure
-
-During onboarding, select **Discord** as the messaging platform and provide:
+During onboarding, provide:
 - Discord bot token (from Phase 0.3)
 - Moonshot API key (for Kimi K2.5)
+- Discord server ID, channel IDs
 
-### 4.3 Verify
+### 3.5.3 Start OpenClaw daemon
 
-Send a message in Discord `#agent-tasks` channel. The bot should respond and be able to create Vikunja tasks.
+```bash
+cp launchd/com.axinova.openclaw.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.axinova.openclaw.plist
+```
+
+### 3.5.4 Verify
+
+Send messages in Discord:
+- `#agent-tasks`: "Add a /health endpoint to miniapp-builder-go" → should create Vikunja task
+- `#agent-tasks`: `/status` → should show fleet status
+- `#agent-tasks`: `/assign devops Update Docker Compose for staging` → should create labeled task
 
 ---
 
-## Phase 5: GitHub & CI/CD Updates
+## Phase 4: GitHub & CI/CD Updates
 
-### 5.1 Exclude agent branches from CI
+### 4.1 Exclude agent branches from CI
 
 For each repo with deploy workflows, add to branch filters:
 ```yaml
@@ -261,7 +342,7 @@ branches:
   - '!agent/**'
 ```
 
-### 5.2 Branch protection
+### 4.2 Branch protection
 
 For all repos, configure `main` branch:
 - Require PR before merging
@@ -270,31 +351,50 @@ For all repos, configure `main` branch:
 
 ---
 
-## Phase 6: End-to-End Test
+## Phase 5: End-to-End Tests
 
-1. Send via Discord: "Add a /v1/templates endpoint to miniapp-builder-go"
-2. Verify: OpenClaw creates Vikunja task with `backend-sde` label
-3. Verify: Backend SDE agent picks up task within 2 min
-4. Verify: Agent creates branch, implements, tests, pushes, creates PR
-5. Verify: Vikunja task updated, SilverBullet log entry
-6. Review PR on GitHub, approve, merge
-7. Verify: CI runs on merge, deployment triggers
+### Test 1: Direct Vikunja → Kimi K2.5
+1. Create task in Vikunja project 13 with label `backend-sde`
+2. Verify: agent claims → Vikunja comments (CLAIMED, STARTED) → Kimi K2.5 generates unified diff → `git apply` → PR → COMPLETED comment → Discord notified
+
+### Test 2: Discord → OpenClaw → Agent
+1. Post in Discord #agent-tasks: "Add a /v1/templates endpoint to miniapp-builder-go"
+2. Verify: OpenClaw creates Vikunja task → agent picks up → full lifecycle
+
+### Test 3: Simple task via Ollama
+1. Create task with label `docs`: "Update README with deployment instructions"
+2. Verify: routes to Ollama → completes locally → no cloud API calls
+
+### Test 4: Codex CLI path
+1. Create coding task → agent tries Codex CLI first
+2. Verify: if ChatGPT auth works, native execution → PR
 
 **Success criteria:**
 - Discord to PR: under 15 min
-- PR follows Go conventions from CLAUDE.md
-- No wasted GitHub Actions minutes
-- Full audit trail: Vikunja → SilverBullet → GitHub PR → Discord notification
+- PR follows code conventions from CLAUDE.md
+- Full audit trail: Vikunja comments → Discord notifications → GitHub PR
+- No API keys in any plist file (all in `~/.config/axinova/*.env`)
+- No wasted GitHub Actions minutes (agent branches excluded)
 
 ---
 
 ## Troubleshooting
 
 ### Agent not picking up tasks
-1. Check logs: `tail -f ~/logs/agent-<role>.log`
+1. Check logs: `tail -f ~/logs/agent-<role>-stdout.log`
 2. Verify Vikunja API: `curl -sf -H "Authorization: Bearer $APP_VIKUNJA__TOKEN" "$APP_VIKUNJA__URL/api/v1/projects" | jq '.[].title'`
 3. Check launchd status: `launchctl list | grep axinova`
 4. Restart agent: `launchctl kickstart -k gui/$(id -u)/com.axinova.agent-<role>`
+
+### LLM model failures
+1. Check Kimi API: `source ~/.config/axinova/moonshot.env && curl -sf https://api.moonshot.cn/v1/models -H "Authorization: Bearer $MOONSHOT_API_KEY" | jq '.data[].id'`
+2. Check Ollama: `curl -sf http://localhost:11434/api/tags | jq '.models[].name'`
+3. Check Codex CLI: `codex --version` (if ChatGPT auth expired, re-run `codex` for OAuth)
+4. Fallback chain: Codex → Kimi → Ollama (check logs for which model was used)
+
+### Vikunja comments not appearing
+1. Verify token has write access: `curl -sf -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"comment":"test"}' "http://localhost:3456/api/v1/tasks/<id>/comments"`
+2. Check agent-launcher.sh logs for `add_task_comment` errors
 
 ### VPN not connecting
 1. Check AmneziaWG app status
@@ -311,3 +411,9 @@ For all repos, configure `main` branch:
 1. Check GitHub auth: `gh auth status`
 2. Verify bot has repo access
 3. Check for branch conflicts: `git status`
+
+### Unified diff fails to apply
+1. Check logs for `git apply` error output
+2. Common causes: wrong file paths, insufficient context lines, file already modified
+3. The agent will comment `[BLOCKED]` on the Vikunja task with the error
+4. Try running the model again or manually apply the suggested changes
