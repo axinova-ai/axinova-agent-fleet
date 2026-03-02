@@ -105,6 +105,17 @@ Every task has structured comments in Vikunja:
 [2026-03-02 14:35] [COMPLETED] PR: https://github.com/... | Model: kimi-k2.5 | Duration: 4m | Commits: 2
 ```
 
+## Prerequisites
+
+- **macOS** 26.x on Apple Silicon (M2 Pro / M4)
+- **Go** 1.24+ and **Node.js** 22+
+- **Docker** (for local dev stacks)
+- **Ollama** (M2 Pro — local LLM inference)
+- **AmneziaWG** VPN client (for remote access)
+- **Homebrew** (package manager)
+- **gh** CLI (GitHub operations)
+- **Codex CLI** (OpenAI autonomous coding agent)
+
 ## Quick Start
 
 ### 1. Bootstrap Mac Mini
