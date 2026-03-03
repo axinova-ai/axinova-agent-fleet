@@ -31,6 +31,8 @@ mkdir -p "$LOG_DIR"
 [[ -f "$HOME/.config/axinova/moonshot.env" ]] && source "$HOME/.config/axinova/moonshot.env"
 # shellcheck disable=SC1090
 [[ -f "$HOME/.config/axinova/secrets.env" ]] && source "$HOME/.config/axinova/secrets.env"
+# shellcheck disable=SC1090
+[[ -f "$HOME/.config/axinova/vikunja.env" ]] && source "$HOME/.config/axinova/vikunja.env"
 
 # Load Discord webhook URLs
 DISCORD_WEBHOOKS_ENV="$HOME/.config/axinova/discord-webhooks.env"
@@ -159,6 +161,33 @@ add_task_comment() {
   timestamp="[$(date '+%Y-%m-%d %H:%M')]"
   vikunja_api PUT "/tasks/${task_id}/comments" \
     "{\"comment\":\"${timestamp} ${comment}\"}" >/dev/null 2>&1 || true
+}
+
+# --- SilverBullet API ---
+SILVERBULLET_URL="${APP_SILVERBULLET__URL:-https://wiki.axinova-internal.xyz}"
+SILVERBULLET_TOKEN="${APP_SILVERBULLET__TOKEN:-}"
+
+silverbullet_get_page() {
+  local page="$1"
+  local encoded="${page// /%20}"
+  curl -sf -H "Authorization: Bearer $SILVERBULLET_TOKEN" \
+    "${SILVERBULLET_URL}/.fs/${encoded}.md" 2>/dev/null
+}
+
+silverbullet_put_page() {
+  local page="$1" content="$2"
+  local encoded="${page// /%20}"
+  printf '%s' "$content" | curl -sf -X PUT \
+    -H "Authorization: Bearer $SILVERBULLET_TOKEN" \
+    -H "Content-Type: text/plain" \
+    --data-binary @- \
+    "${SILVERBULLET_URL}/.fs/${encoded}.md" 2>/dev/null
+}
+
+# Detect if a task is a wiki/SilverBullet task (vs. a git/code task)
+is_wiki_task() {
+  local title="$1" desc="$2"
+  echo "$title $desc" | grep -qiE 'WIKI_PAGES:|silverbullet wiki|update wiki page|create wiki page'
 }
 
 # --- LLM Functions ---
@@ -389,10 +418,12 @@ poll_for_task() {
 
   # Find first undone task with matching role label that hasn't been claimed yet
   # (bucket_id is always 0 in task API response — kanban buckets are view-specific)
-  # Filter: has role label, not done, percent_done == 0 (unclaimed)
+  # Filter: has role label, not done, percent_done == 0 (unclaimed), title contains repo name
   local task
-  task=$(echo "$tasks" | jq -r --arg role "$ROLE" '
-    [.[] | select(.labels != null and (.labels[].title == $role)) | select(.percent_done == 0)] | first // {"id": 0}
+  task=$(echo "$tasks" | jq -r --arg role "$ROLE" --arg repo "$REPO_NAME" '
+    [.[] | select(.labels != null and (.labels[].title == $role))
+         | select(.percent_done == 0)
+         | select(.title | test($repo; "i"))] | first // {"id": 0}
   ' 2>/dev/null) || { echo '{"id": 0}'; return; }
 
   echo "$task"
@@ -434,6 +465,163 @@ escalate_task_to_founder() {
     16711680  # red
 }
 
+# --- Wiki Task Execution (tech-writer role) ---
+# Used when task description contains WIKI_PAGES: list.
+# Flow: read pages → Codex/Kimi improve → PUT back to SilverBullet → Done (no PR unless repo files changed)
+execute_wiki_task() {
+  local task_id="$1"
+  local task_title="$2"
+  local task_description="$3"
+  local start_time
+  start_time=$(date +%s)
+
+  log "Executing wiki task #$task_id: $task_title"
+  add_task_comment "$task_id" "[STARTED] Wiki task | Model: codex→kimi | SilverBullet"
+
+  # Extract WIKI_PAGES: list from description (comma-separated page names)
+  local wiki_pages_raw=""
+  wiki_pages_raw=$(echo "$task_description" | grep -oP '(?<=WIKI_PAGES:)[^\n]+' | head -1 | tr ',' '\n' | sed 's/^ *//; s/ *$//')
+
+  # Build context: read current page contents from SilverBullet
+  local pages_context=""
+  local page_list=()
+  if [[ -n "$wiki_pages_raw" ]]; then
+    while IFS= read -r page; do
+      [[ -z "$page" ]] && continue
+      page_list+=("$page")
+      local content
+      content=$(silverbullet_get_page "$page")
+      pages_context+="=== ${page} ===\n${content}\n\n"
+    done <<< "$wiki_pages_raw"
+  fi
+
+  local sop_content=""
+  [[ -f "$FLEET_DIR/docs/silverbullet-sop.md" ]] && \
+    sop_content=$(head -80 "$FLEET_DIR/docs/silverbullet-sop.md")
+
+  local execution_success=false
+
+  # --- Try Codex CLI first (can run curl commands directly) ---
+  if check_codex_available && [[ -n "$SILVERBULLET_TOKEN" ]]; then
+    log "Attempting Codex CLI for wiki task..."
+    local codex_prompt="You are a tech-writer agent. Use curl to read/write SilverBullet wiki pages.
+
+SilverBullet API (use these exact commands):
+  Read:  curl -sf -H 'Authorization: Bearer ${SILVERBULLET_TOKEN}' '${SILVERBULLET_URL}/.fs/<page-name>.md'
+  Write: printf '%s' '<content>' | curl -sf -X PUT -H 'Authorization: Bearer ${SILVERBULLET_TOKEN}' -H 'Content-Type: text/plain' --data-binary @- '${SILVERBULLET_URL}/.fs/<page-name>.md'
+  Note: spaces in page names become %20 in the URL (slashes stay as-is).
+
+Wiki SOP (follow this):
+${sop_content}
+
+## Task #${task_id}: ${task_title}
+${task_description}
+
+## Current Page Contents
+${pages_context}
+
+## Workflow
+1. For each page in WIKI_PAGES: improve content following SOP (frontmatter, [[wiki-links]], tables, Related Pages)
+2. Write each improved page back via curl PUT
+3. If any docs/ files need creating in the repo, create and \`git add\` them
+4. \`git commit\` any repo changes (message: '[tech-writer] Task #${task_id}: ${task_title}')
+5. Do NOT push"
+
+    if codex exec --full-auto -C "$REPO_PATH" "$codex_prompt" >>"$LOG_FILE" 2>&1; then
+      log "Codex wiki task completed"
+      execution_success=true
+    else
+      log "Codex wiki task failed, falling back to Kimi"
+    fi
+  fi
+
+  # --- Fallback: Kimi K2.5 improves each page individually ---
+  if [[ "$execution_success" == "false" && ${#page_list[@]} -gt 0 && -n "${MOONSHOT_API_KEY:-}" ]]; then
+    log "Using Kimi K2.5 for wiki pages (${#page_list[@]} pages)..."
+    local kimi_success=true
+    for page in "${page_list[@]}"; do
+      local current_content
+      current_content=$(silverbullet_get_page "$page")
+      [[ -z "$current_content" ]] && { log "WARNING: Could not read page: $page"; continue; }
+
+      local improve_prompt="You are a tech-writer. Improve this SilverBullet wiki page.
+
+Follow the SOP:
+- Add/update frontmatter: title, tags (expanded), owner (platform-engineering), reviewed ($(date +%Y-%m-%d)), status (active), type
+- Replace plain text navigation with [[wiki-links]]
+- Convert dense paragraphs to tables
+- Add Related Pages section at bottom
+
+Task context: ${task_title}
+${task_description}
+
+Current content of '${page}':
+${current_content}
+
+Return ONLY the complete improved page markdown. No fences, no commentary."
+
+      local improved
+      improved=$(call_kimi_api "$improve_prompt" 16000) || { kimi_success=false; continue; }
+
+      if [[ -n "$improved" ]]; then
+        if silverbullet_put_page "$page" "$improved"; then
+          log "Updated wiki page: $page"
+          add_task_comment "$task_id" "[WIKI] Updated: $page"
+        else
+          log "ERROR: Failed to write wiki page: $page"
+          kimi_success=false
+        fi
+      fi
+    done
+    [[ "$kimi_success" == "true" ]] && execution_success=true
+  fi
+
+  # Handle any git changes (docs/ files created by Codex)
+  cd "$REPO_PATH"
+  local has_git_changes=false
+  if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+    has_git_changes=true
+    git add -A
+    git commit -m "[tech-writer] Task #${task_id}: ${task_title}
+
+Automated by Axinova Agent Fleet (wiki task)" 2>>"$LOG_FILE" || true
+  fi
+
+  local duration=$(( $(date +%s) - start_time ))
+  local duration_str="$(( duration / 60 ))m$(( duration % 60 ))s"
+
+  if [[ "$execution_success" == "true" ]]; then
+    if [[ "$has_git_changes" == "true" ]]; then
+      # Repo changes → push + PR (then review)
+      local branch_name="agent/${ROLE}/task-${task_id}"
+      git checkout -b "$branch_name" 2>>"$LOG_FILE" || true
+      git push -u origin "$branch_name" 2>>"$LOG_FILE" || true
+      local pr_url
+      pr_url=$(gh pr create \
+        --title "[tech-writer] Task #${task_id}: ${task_title}" \
+        --body "Wiki + repo update. Vikunja task #${task_id}. Duration: ${duration_str}." \
+        --base main 2>>"$LOG_FILE") || true
+      local result_msg="[COMPLETED] Wiki + repo changes | Duration: ${duration_str}"
+      [[ -n "$pr_url" ]] && result_msg+=" | PR: $pr_url"
+      move_to_bucket "$task_id" "$BUCKET_IN_REVIEW"
+      add_task_comment "$task_id" "$result_msg"
+    else
+      # Wiki-only → move straight to Done
+      move_to_bucket "$task_id" "$BUCKET_DONE"
+      update_vikunja_task "$task_id" '{"done": true}'
+      add_task_comment "$task_id" "[COMPLETED] Wiki updated | Duration: ${duration_str} | Pages: ${#page_list[@]}"
+    fi
+    notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
+      "Wiki Task Done - #${task_id}" \
+      "**${task_title}**\nPages updated: ${#page_list[@]} | Duration: ${duration_str}" \
+      65280  # green
+  else
+    escalate_task_to_founder "$task_id" "$task_title" "Wiki task execution failed after codex + kimi attempts"
+  fi
+
+  git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
+}
+
 # --- Task Execution (multi-model) ---
 execute_task() {
   local task_id="$1"
@@ -445,6 +633,13 @@ execute_task() {
   start_time=$(date +%s)
 
   log "Executing task #$task_id: $task_title"
+
+  # Route wiki tasks (tech-writer + WIKI_PAGES: in description) to wiki execution path
+  if is_wiki_task "$task_title" "$task_description"; then
+    log "Detected wiki task — routing to execute_wiki_task()"
+    execute_wiki_task "$task_id" "$task_title" "$task_description"
+    return
+  fi
 
   # Create and switch to branch
   cd "$REPO_PATH"
