@@ -203,7 +203,7 @@ docs/                   # Agent teams, runbooks, architecture
 
 ## Security
 
-- **VPN:** AmneziaWG (DPI-resistant) to Singapore server (8.222.187.10:54321)
+- **VPN:** AmneziaWG (DPI-resistant) to Singapore server (8.222.187.10:39999, stable relay port)
 - **Auth:** Fine-grained GitHub PAT, stored in 1Password
 - **Secrets:** `~/.config/axinova/*.env` (chmod 600) — **NOT** in plist files
 - **Isolation:** Dedicated agent users (`agent01`, `focusagent02`)

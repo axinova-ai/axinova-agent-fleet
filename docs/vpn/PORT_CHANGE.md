@@ -1,79 +1,119 @@
 # VPN Port Change Guide
 
-## Why Change Ports
+## Architecture: Stable Relay Port (implemented 2026-03-07)
 
-Chinese ISPs use Deep Packet Inspection (DPI) to fingerprint and block VPN traffic. They can detect WireGuard's default port (51820) and even the WireGuard protocol itself. UDP 443 was initially used (looks like QUIC/HTTPS) but Chinese ISPs started blocking UDP 443 return traffic. Port 54321 is now used as a less commonly targeted high port.
-
-**Migration to AmneziaWG:** As of 2026-02-13, the VPN has been migrated from WireGuard to AmneziaWG. AmneziaWG adds traffic obfuscation to bypass DPI, making it much harder for ISPs to detect and block VPN traffic even if they inspect packets.
-
-**Current port:** UDP 54321
-**Bad ports:** 51820 (default WG), 443 (Chinese ISPs block UDP 443 return traffic)
-
-## Port Change Checklist
-
-### 1. Server Config
-
-```bash
-ssh sg-vpn "sed -i 's/^ListenPort = OLD_PORT/ListenPort = NEW_PORT/' /etc/amnezia/amneziawg/awg0.conf"
-ssh sg-vpn "awg-quick down awg0 && awg-quick up awg0"
+```
+Clients (AmneziaWG 2.0 apps)
+    │
+    │  UDP 39999 (stable port — NEVER changes in client configs)
+    ▼
+Aliyun Console Firewall (swas.console.aliyun.com)
+    │
+    ▼
+UFW (on server)
+    │
+    ▼
+iptables DNAT: 39999 → 13231 (internal AWG port, can rotate freely)
+    │
+    ▼
+amneziawg-go (userspace, listening on internal port)
+    │
+    ▼
+awg0 interface (10.66.66.1/24)
+    │
+    ▼
+iptables MASQUERADE → eth0 → internet
 ```
 
-### 2. Aliyun Console Firewall
+### Design Decision
 
-Go to https://swas.console.aliyun.com → Server → Firewall → Add rule:
+**Problem:** Every time GFW blocks a port, all 13 client configs across phones/laptops/desktops need manual updates — QR codes rescanned, configs reimported. This is painful and error-prone.
+
+**Solution:** A two-layer port architecture using iptables DNAT:
+
+1. **Stable relay port (39999):** The only port clients ever see. Hardcoded in all client configs. Open permanently in Aliyun security group and UFW. Never changes.
+2. **Internal AWG port (currently 13231):** The port `amneziawg-go` actually listens on. Can be rotated freely when GFW blocks it. Only referenced in `awg0.conf` and the iptables DNAT rule.
+
+**How it works:** iptables PREROUTING DNAT rewrites incoming UDP packets destined for port 39999 to port 13231 before they reach amneziawg-go. The kernel's conntrack automatically rewrites the source port on response packets from 13231 back to 39999, so the client sees a consistent port.
+
+**Why it feels smoother:** When GFW starts targeting a port, it typically throttles before hard-blocking (packet loss, increased latency). A freshly rotated internal port has zero GFW attention, giving clean throughput. The stable relay port itself is less likely to be targeted since GFW sees the internal port rotation as "the service disappeared."
+
+### Current State
+
+| Component | Value |
+|-----------|-------|
+| Client-facing stable port | UDP 39999 |
+| Internal AWG listen port | UDP 13231 |
+| iptables DNAT rule | `udp dpt:39999 → :13231` |
+| Rules persisted at | `/etc/iptables/rules.v4` |
+
+## Port Rotation (when GFW blocks the internal port)
+
+**One command, zero client changes:**
+
+```bash
+./scripts/rotate-vpn-port.sh <new_internal_port>
+# Example: ./scripts/rotate-vpn-port.sh 27845
+```
+
+The script handles everything server-side:
+1. Updates `awg0.conf` ListenPort
+2. Updates iptables DNAT rule: 39999 → new port
+3. Persists iptables rules to `/etc/iptables/rules.v4`
+4. Restarts `awg-quick@awg0`
+5. Updates UFW (opens new, closes old internal port)
+6. Updates ansible references in the repo
+
+**No client action needed.** All devices keep connecting to port 39999.
+
+### Manual rotation (if script unavailable)
+
+```bash
+NEW_PORT=27845
+OLD_PORT=13231  # check: grep ListenPort /etc/amnezia/amneziawg/awg0.conf
+
+# 1. Update server config
+ssh sg-vpn "sed -i 's/ListenPort = ${OLD_PORT}/ListenPort = ${NEW_PORT}/' /etc/amnezia/amneziawg/awg0.conf"
+
+# 2. Update iptables DNAT
+ssh sg-vpn "iptables -t nat -D PREROUTING -p udp --dport 39999 -j DNAT --to-destination :${OLD_PORT} 2>/dev/null; \
+            iptables -t nat -A PREROUTING -p udp --dport 39999 -j DNAT --to-destination :${NEW_PORT}; \
+            iptables-save > /etc/iptables/rules.v4"
+
+# 3. Restart service
+ssh sg-vpn "systemctl restart awg-quick@awg0"
+
+# 4. Update UFW
+ssh sg-vpn "ufw allow ${NEW_PORT}/udp; ufw delete allow ${OLD_PORT}/udp; ufw reload"
+
+# 5. Verify
+ssh sg-vpn "awg show awg0 | head -5 && iptables -t nat -L PREROUTING -n | grep 39999"
+```
+
+## Aliyun Console Firewall
+
+Only port **39999** needs to be open permanently. Internal port changes do NOT require Aliyun console updates.
+
+Go to https://swas.console.aliyun.com → Server → Firewall:
 - Protocol: **UDP**
-- Port: **NEW_PORT**
+- Port: **39999**
 - Source: `0.0.0.0/0`
 - Policy: Allow
 
-> **Important:** This is separate from UFW inside the VM. Both must allow the port.
+> **Important:** This is separate from UFW inside the VM. Both must allow the stable port.
 
-### 3. Client Configs (all 10 .conf files)
-
-```bash
-cd axinova-agent-fleet
-# Update all client configs
-find vpn-distribution/configs -name "*.conf" -exec sed -i '' 's/8.222.187.10:OLD_PORT/8.222.187.10:NEW_PORT/g' {} \;
-```
-
-### 4. QR Codes (3 mobile devices)
+## Verify After Rotation
 
 ```bash
-qrencode -t PNG -o vpn-distribution/qr-codes/wei-iphone.png < vpn-distribution/configs/ios/wei-iphone.conf
-qrencode -t UTF8 -o vpn-distribution/qr-codes/wei-iphone.txt < vpn-distribution/configs/ios/wei-iphone.conf
+# Check AWG is listening on new internal port
+ssh sg-vpn "ss -ulnp | grep amnezia"
 
-qrencode -t PNG -o vpn-distribution/qr-codes/wei-android-xiaomi-ultra14.png < vpn-distribution/configs/android/wei-android-xiaomi-ultra14.conf
-qrencode -t UTF8 -o vpn-distribution/qr-codes/wei-android-xiaomi-ultra14.txt < vpn-distribution/configs/android/wei-android-xiaomi-ultra14.conf
+# Check DNAT rule points to new internal port
+ssh sg-vpn "iptables -t nat -L PREROUTING -n"
 
-qrencode -t PNG -o vpn-distribution/qr-codes/lisha-iphone.png < vpn-distribution/configs/ios/lisha-iphone.conf
-qrencode -t UTF8 -o vpn-distribution/qr-codes/lisha-iphone.txt < vpn-distribution/configs/ios/lisha-iphone.conf
-```
-
-### 5. Ansible/Repo References
-
-Update these files:
-- `ansible/inventories/vpn/clients.yml` → `server.endpoint`
-- `ansible/roles/wireguard_server/defaults/main.yml` → `vpn_port`
-- `ansible/inventories/vpn/hosts.ini` → `vpn_port`
-- `ansible/scripts/generate-client-qr.sh` → `SERVER_ENDPOINT`
-- `bootstrap/vpn/wg0.conf.template` → `Endpoint`
-- `bootstrap/vpn/wireguard-install.sh` → `Endpoint`
-
-### 6. Redistribute to Devices
-
-- **Phones:** Delete old tunnel in AmneziaWG app, scan new QR code
-- **macOS:** Replace config at `/etc/amnezia/amneziawg/awg0.conf` or edit Endpoint port
-- **Windows:** Import new config in AmneziaWG GUI or edit Endpoint port
-
-### 7. Verify
-
-```bash
-# Check server is listening on new port
-ssh sg-vpn "ss -ulnp | grep NEW_PORT"
-
-# Check UDP reaches server (from local)
-ssh sg-vpn "timeout 10 tcpdump -i eth0 udp port NEW_PORT -c 3 -n &"
-echo "test" | nc -u -w1 8.222.187.10 NEW_PORT
+# Watch traffic arriving on stable port 39999
+ssh sg-vpn "timeout 15 tcpdump -i eth0 udp port 39999 -n -c 5"
+# Toggle VPN on a phone while running
 
 # Check handshake after client connects
 ssh sg-vpn "awg show awg0"
@@ -83,16 +123,21 @@ ssh sg-vpn "awg show awg0"
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| No packets reach server | Aliyun console firewall missing rule | Add UDP rule in swas.console.aliyun.com |
-| Handshake but no internet | Missing FORWARD/NAT rules | Check `iptables -L FORWARD` and MASQUERADE |
-| Worked then stopped | ISP blocked the port | Change to a different port |
-| Broke after server reboot | Unattended-upgrades updated libsodium/libc6 | Reboot again; consider disabling unattended-upgrades |
+| No packets on port 39999 | Aliyun console firewall missing rule | Add UDP 39999 in swas.console.aliyun.com |
+| Packets on 39999 but no handshake | DNAT rule missing/wrong | Re-add: `iptables -t nat -A PREROUTING -p udp --dport 39999 -j DNAT --to-destination :<internal_port>` |
+| Handshake but no internet | Missing MASQUERADE | `iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -o eth0 -j MASQUERADE` |
+| Worked then stopped | GFW blocked internal port | Run `./scripts/rotate-vpn-port.sh <new_port>` |
+| amneziawg-go stuck (0 transfer, all peers) | Process in bad state after aggressive restart | `systemctl restart awg-quick@awg0` |
+| After server reboot, DNAT gone | iptables rules not persisted | `iptables-save > /etc/iptables/rules.v4` (iptables-persistent should auto-restore) |
 
-## History
+## Port History
 
-| Date | Port | Protocol | Reason |
-|------|------|----------|--------|
-| 2026-02-08 | 51820 | WireGuard | Initial setup (default WireGuard port) |
-| 2026-02-09 | 443 | WireGuard | ISP blocked 51820; switched to UDP 443 |
-| 2026-02-13 | 443 | AmneziaWG | Migrated to AmneziaWG for DPI evasion; kept UDP 443 |
-| 2026-02-14 | 54321 | AmneziaWG | Chinese ISPs block UDP 443 return traffic; switched to 54321 |
+| Date | Client Port | Internal Port | Protocol | Reason |
+|------|-------------|---------------|----------|--------|
+| 2026-02-08 | 51820 | 51820 | WireGuard | Initial setup (default WireGuard port) |
+| 2026-02-09 | 443 | 443 | WireGuard | ISP blocked 51820; switched to UDP 443 |
+| 2026-02-13 | 443 | 443 | AmneziaWG | Migrated to AmneziaWG for DPI evasion; kept UDP 443 |
+| 2026-02-14 | 54321 | 54321 | AmneziaWG | Chinese ISPs block UDP 443 return traffic |
+| 2026-03-07 | **39999** | 13231 | AmneziaWG | GFW blocked 54321; introduced stable relay port architecture |
+
+**Bad ports:** 51820 (default WG, targeted), 443 (Chinese ISPs block UDP 443 return traffic), 54321 (GFW blocked after ~3 weeks)

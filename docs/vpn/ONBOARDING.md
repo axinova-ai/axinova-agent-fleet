@@ -312,8 +312,8 @@ ssh sg-vpn 'sudo iptables -L -n -v'
 ```
 
 **No handshake appearing:**
-- Verify correct server endpoint (8.222.187.10:54321)
-- Check UDP port 54321 is not blocked by firewall
+- Verify correct server endpoint (8.222.187.10:39999)
+- Check UDP port 39999 is open in both UFW and Aliyun console firewall
 - Verify client config has correct server public key
 - Check system time is synchronized (NTP)
 
@@ -438,7 +438,7 @@ ssh sg-vpn 'sudo awg show awg0 transfer'
 
 ### Server Details
 
-- **Endpoint**: 8.222.187.10:54321
+- **Endpoint**: 8.222.187.10:39999 (stable relay port; internal AWG port may differ)
 - **VPN Network**: 10.66.66.0/24
 - **Server IP**: 10.66.66.1
 - **DNS**: 1.1.1.1

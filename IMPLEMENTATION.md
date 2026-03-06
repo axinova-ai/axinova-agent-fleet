@@ -400,7 +400,7 @@ For all repos, configure `main` branch:
 1. Check AmneziaWG app status
 2. Verify config has correct obfuscation params
 3. Test: `ping 10.66.66.1`
-4. Check Aliyun console firewall (UDP 54321 must be open)
+4. Check Aliyun console firewall (UDP 39999 must be open)
 
 ### MCP tools not working
 1. Verify binary exists: `ls ~/workspace/axinova-mcp-server-go/bin/axinova-mcp-server`

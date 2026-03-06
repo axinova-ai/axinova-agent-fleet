@@ -7,12 +7,15 @@ Operational reference for diagnosing and fixing AmneziaWG VPN issues.
 ```
 Clients (AmneziaWG 2.0 apps)
     │
-    │  UDP 54321 (obfuscated)
+    │  UDP 39999 (stable relay port — never changes in client configs)
     ▼
 Aliyun Console Firewall (swas.console.aliyun.com)
     │
     ▼
 UFW (on server)
+    │
+    ▼
+iptables DNAT: 39999 → 13231 (internal AWG port, rotates when GFW blocks)
     │
     ▼
 amneziawg-go (userspace, NOT kernel module)
@@ -24,11 +27,14 @@ awg0 interface (10.66.66.1/24)
 iptables MASQUERADE → eth0 → internet
 ```
 
-- **Server:** 8.222.187.10:54321 (private: 172.19.24.184)
+- **Server:** 8.222.187.10 (private: 172.19.24.184)
+- **Client-facing port:** UDP 39999 (stable, permanent)
+- **Internal AWG port:** UDP 13231 (rotatable via `./scripts/rotate-vpn-port.sh`)
 - **Subnet:** 10.66.66.0/24
 - **Config:** `/etc/amnezia/amneziawg/awg0.conf`
 - **Service:** `awg-quick@awg0`
 - **Process:** `amneziawg-go awg0` (userspace)
+- **DNAT rule:** persisted in `/etc/iptables/rules.v4`
 
 ## Quick Health Check
 
@@ -58,15 +64,15 @@ ssh sg-vpn 'sudo awg show awg0 | head -5'
 # If "Unable to access interface" → service is down, go to Fix A
 
 # Step 2: Are packets reaching the server?
-ssh sg-vpn 'sudo timeout 15 tcpdump -i eth0 udp port 54321 -n -c 10'
+ssh sg-vpn 'sudo timeout 15 tcpdump -i eth0 udp port 39999 -n -c 10'
 # Toggle VPN on phone/laptop while tcpdump runs
 # If NO packets → port blocked, go to Fix B
 # If packets arrive → continue to step 3
 
 # Step 3: Does server respond?
 # In tcpdump output, look for BOTH directions:
-#   client_ip.port > 172.19.24.184.54321  (inbound)
-#   172.19.24.184.54321 > client_ip.port  (outbound response)
+#   client_ip.port > 172.19.24.184.39999  (inbound, hits DNAT → internal port)
+#   172.19.24.184.39999 > client_ip.port  (outbound response, conntrack rewrites port)
 # If server responds but no handshake → ISP blocking return traffic, go to Fix C
 # If server does NOT respond → protocol issue, go to Fix D
 
@@ -87,53 +93,29 @@ ssh sg-vpn 'sudo awg show awg0 | head -3'
 **Fix B: Port blocked (no packets reaching server)**
 ```bash
 # Check UFW
-ssh sg-vpn 'sudo ufw status | grep 54321'
+ssh sg-vpn 'sudo ufw status | grep 39999'
 # If missing:
-ssh sg-vpn 'sudo ufw allow 54321/udp'
+ssh sg-vpn 'sudo ufw allow 39999/udp'
 
 # Check Aliyun console firewall
 # Go to swas.console.aliyun.com → Server → Firewall
-# Ensure UDP 54321 is listed. Server reboots may reset this.
+# Ensure UDP 39999 is listed. Server reboots may reset this.
 ```
 
-**Fix C: ISP blocking return traffic on current port → change port**
+**Fix C: ISP/GFW blocking the internal port → rotate internal port**
 ```bash
-# Pick a new random port (e.g., 38291)
-NEW_PORT=38291
-
-# Server side
-ssh sg-vpn "sudo awg-quick down awg0 && sudo sed -i 's/ListenPort = 54321/ListenPort = $NEW_PORT/' /etc/amnezia/amneziawg/awg0.conf && sudo ufw allow $NEW_PORT/udp && sudo awg-quick up awg0"
-
-# Verify
-ssh sg-vpn "sudo awg show awg0 | grep 'listening port'"
-
-# Open port in Aliyun console firewall (swas.console.aliyun.com)
-
-# Update client configs locally
+# One command — no client changes needed (stable relay port architecture)
 cd ~/axinova/axinova-agent-fleet
-find vpn-distribution/configs -name "*.conf" -exec sed -i '' "s/8.222.187.10:54321/8.222.187.10:$NEW_PORT/g" {} \;
+./scripts/rotate-vpn-port.sh 27845  # pick any random port
 
-# Regenerate QR codes for mobile devices
-for f in vpn-distribution/configs/ios/wei-iphone.conf vpn-distribution/configs/ios/lisha-iphone.conf vpn-distribution/configs/android/wei-android-xiaomi-ultra14.conf; do
-    dir=$(dirname "$f")
-    name=$(basename "$f" .conf)
-    qrencode -o "$dir/$name.png" < "$f"
-    qrencode -t ansiutf8 < "$f" > "$dir/$name.txt"
-done
-
-# Update repo references
-sed -i '' "s/54321/$NEW_PORT/g" ansible/inventories/vpn/clients.yml
-sed -i '' "s/54321/$NEW_PORT/g" ansible/roles/wireguard_server/defaults/main.yml
-sed -i '' "s/54321/$NEW_PORT/g" ansible/scripts/generate-client-qr.sh
-sed -i '' "s/54321/$NEW_PORT/g" bootstrap/vpn/wg0.conf.template
-
-# Redistribute: phones scan new QR, desktops update Endpoint port
+# The script updates: awg0.conf ListenPort, iptables DNAT (39999 → new port),
+# UFW rules, and ansible references. All clients keep using port 39999.
 ```
 
 **Fix D: Protocol / obfuscation mismatch**
 ```bash
 # Check packet sizes in tcpdump to verify obfuscation is working:
-ssh sg-vpn 'sudo timeout 15 tcpdump -i eth0 udp port 54321 -n'
+ssh sg-vpn 'sudo timeout 15 tcpdump -i eth0 udp port 39999 -n'
 # Client should send: 5 junk packets (varying sizes) + 193-byte init (148 + S1=45)
 # Server should respond: 167-byte packet (92 + S2=75)
 # If client sends exactly 148 bytes → client NOT applying obfuscation (wrong app or missing params)
@@ -175,11 +157,11 @@ ssh sg-vpn 'sysctl net.ipv4.ip_forward'
 
 ```bash
 # Quick test: can packets still reach server?
-ssh sg-vpn 'sudo timeout 10 tcpdump -i eth0 udp port 54321 -n -c 3'
+ssh sg-vpn 'sudo timeout 10 tcpdump -i eth0 udp port 39999 -n -c 3'
 # Toggle VPN on client while running
 
-# If packets arrive and server responds but no handshake → ISP blocking return, change port (Fix C above)
-# If no packets arrive at all → Aliyun firewall reset (check console) or ISP blocking inbound too
+# If packets arrive and server responds but no handshake → GFW blocking, rotate internal port (Fix C above)
+# If no packets arrive at all → Aliyun firewall reset (check console for UDP 39999) or ISP blocking inbound
 ```
 
 **Other causes:**
@@ -199,7 +181,11 @@ ssh sg-vpn 'lsmod | grep amneziawg'
 # Should be empty. Blacklist at /etc/modprobe.d/blacklist-amneziawg.conf
 
 # Re-check Aliyun console firewall — it may reset on reboot
-# swas.console.aliyun.com → Firewall → verify UDP 54321 exists
+# swas.console.aliyun.com → Firewall → verify UDP 39999 exists
+# Also verify DNAT rule survived reboot:
+ssh sg-vpn 'iptables -t nat -L PREROUTING -n | grep 39999'
+# If missing: iptables-persistent should auto-restore from /etc/iptables/rules.v4
+# Manual restore: iptables-restore < /etc/iptables/rules.v4
 ```
 
 ## If DPI Catches Up (Escalation Options)
@@ -246,9 +232,10 @@ ssh sg-vpn 'sudo systemctl restart awg-quick@awg0'
 
 ## Port Change History
 
-| Date | Port | Protocol | Reason |
-|------|------|----------|--------|
-| 2026-02-08 | 51820 | WireGuard | Initial setup |
-| 2026-02-09 | 443 | WireGuard | ISP blocked 51820 |
-| 2026-02-13 | 443 | AmneziaWG | Migrated for DPI evasion |
-| 2026-02-14 | 54321 | AmneziaWG | ISP blocks UDP 443 return traffic |
+| Date | Client Port | Internal Port | Protocol | Reason |
+|------|-------------|---------------|----------|--------|
+| 2026-02-08 | 51820 | 51820 | WireGuard | Initial setup |
+| 2026-02-09 | 443 | 443 | WireGuard | ISP blocked 51820 |
+| 2026-02-13 | 443 | 443 | AmneziaWG | Migrated for DPI evasion |
+| 2026-02-14 | 54321 | 54321 | AmneziaWG | ISP blocks UDP 443 return traffic |
+| 2026-03-07 | **39999** | 13231 | AmneziaWG | GFW blocked 54321; introduced stable relay port (iptables DNAT) |

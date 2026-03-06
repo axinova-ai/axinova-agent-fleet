@@ -83,7 +83,7 @@ All 10 devices need to migrate to AmneziaWG:
 ## Current VPN Server Status
 
 - **Protocol:** AmneziaWG (WireGuard with obfuscation)
-- **Endpoint:** 8.222.187.10:54321
+- **Endpoint:** 8.222.187.10:39999 (stable relay port; internal AWG port may differ)
 - **Server Public Key:** 4utg8R6pINVXmF0EilIQx2LAtndqO0plkv2kdEwf3QE=
 - **VPN Network:** 10.66.66.0/24
 - **Interface:** awg0

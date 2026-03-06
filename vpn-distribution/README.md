@@ -88,6 +88,6 @@ cp /tmp/vpn-onboarding-*/*.txt /tmp/vpn-onboarding-*/*.md vpn-distribution/docum
 
 **Last Updated:** 2026-02-13 (migrated to AmneziaWG)
 **Generated:** 2026-02-08 (original WireGuard), 2026-02-13 (AmneziaWG migration)
-**VPN Server:** 8.222.187.10:54321 (Singapore)
+**VPN Server:** 8.222.187.10:39999 (Singapore, stable relay port)
 **Protocol:** AmneziaWG (WireGuard with obfuscation)
 **Documentation:** See `docs/vpn/ONBOARDING.md` and `docs/vpn/CLIENT_SETUP.md` for full guide

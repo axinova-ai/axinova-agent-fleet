@@ -58,7 +58,7 @@
 
 **Mitigations:**
 - Strong WireGuard keys (256-bit)
-- Firewall on Aliyun SG server (only port 54321/udp)
+- Firewall on Aliyun SG server (only port 39999/udp exposed; internal AWG port behind iptables DNAT)
 - AllowedIPs restricted to VPN subnet (10.100.0.0/24)
 - PersistentKeepalive to detect dead connections
 - Separate VPN keys per device
@@ -198,7 +198,7 @@
 
 ### Network Security
 - [ ] WireGuard VPN with strong keys
-- [ ] Firewall on Aliyun SG server (port 54321 only)
+- [ ] Firewall on Aliyun SG server (port 39999 only, DNAT to internal AWG port)
 - [ ] AllowedIPs restricted to VPN subnet
 - [ ] Thunderbolt bridge uses private IP range (169.254.0.0/16)
 

@@ -25,7 +25,7 @@ Note: Keys are still stored at `/etc/wireguard/keys/` even though AmneziaWG conf
 
 ## Server Details
 
-- **Server Endpoint:** `8.222.187.10:54321`
+- **Server Endpoint:** `8.222.187.10:39999`
 - **Server VPN IP:** `10.66.66.1`
 - **VPN Network:** `10.66.66.0/24`
 - **DNS:** `1.1.1.1`
@@ -81,7 +81,7 @@ Note: Keys are still stored at `/etc/wireguard/keys/` even though AmneziaWG conf
 
    [Peer]
    PublicKey = <SERVER_PUBLIC_KEY>
-   Endpoint = 8.222.187.10:54321
+   Endpoint = 8.222.187.10:39999
    AllowedIPs = 0.0.0.0/0
    PersistentKeepalive = 25
    ```
@@ -147,7 +147,7 @@ sudo systemctl enable awg-quick@awg0  # On Linux
 
    [Peer]
    PublicKey = <SERVER_PUBLIC_KEY>
-   Endpoint = 8.222.187.10:54321
+   Endpoint = 8.222.187.10:39999
    AllowedIPs = 0.0.0.0/0
    PersistentKeepalive = 25
    ```
@@ -212,7 +212,7 @@ sudo systemctl enable awg-quick@awg0  # On Linux
 
    - **Peer section:**
      - Public key: `<SERVER_PUBLIC_KEY>`
-     - Endpoint: `8.222.187.10:54321`
+     - Endpoint: `8.222.187.10:39999`
      - Allowed IPs: `0.0.0.0/0`
      - Persistent keepalive: `25`
 
@@ -330,7 +330,7 @@ Expected output:
    ssh sg-vpn 'systemctl status awg-quick@awg0'
    ```
 
-2. **Verify firewall allows UDP 54321:**
+2. **Verify firewall allows UDP 39999:**
    ```bash
    ssh sg-vpn 'sudo ufw status'
    ```
