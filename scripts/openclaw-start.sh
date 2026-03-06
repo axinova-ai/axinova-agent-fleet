@@ -43,7 +43,7 @@ export GLOBAL_AGENT_HTTP_PROXY="socks5://127.0.0.1:${SOCKS_PORT}"
 # Don't proxy local/VPN traffic
 export GLOBAL_AGENT_NO_PROXY="localhost,127.0.0.1,10.66.66.*,192.168.3.*,api.moonshot.cn"
 # Load global-agent to intercept all Node.js HTTP/WebSocket connections
-export NODE_OPTIONS="-r global-agent/bootstrap"
+export NODE_OPTIONS="-r /opt/homebrew/lib/node_modules/global-agent/bootstrap"
 
 # Start the OpenClaw gateway
 exec openclaw gateway
