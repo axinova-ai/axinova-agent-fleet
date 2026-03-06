@@ -39,11 +39,11 @@ if ! nc -z 127.0.0.1 "$SOCKS_PORT" 2>/dev/null; then
 fi
 
 # Route all Node.js connections through SOCKS5 proxy (bypass GFW for Discord)
-export GLOBAL_AGENT_HTTP_PROXY="socks5://127.0.0.1:${SOCKS_PORT}"
-# Don't proxy local/VPN traffic
-export GLOBAL_AGENT_NO_PROXY="localhost,127.0.0.1,10.66.66.*,192.168.3.*,api.moonshot.cn"
-# Load global-agent to intercept all Node.js HTTP/WebSocket connections
-export NODE_OPTIONS="-r /opt/homebrew/lib/node_modules/global-agent/bootstrap"
+export SOCKS5_PROXY="socks5://127.0.0.1:${SOCKS_PORT}"
+export NO_PROXY="localhost,127.0.0.1,10.66.66.1,192.168.3.1"
+# Load self-contained proxy interceptor (no external npm deps required)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export NODE_OPTIONS="-r ${SCRIPT_DIR}/proxy-bootstrap.cjs"
 
 # Start the OpenClaw gateway
 exec openclaw gateway
