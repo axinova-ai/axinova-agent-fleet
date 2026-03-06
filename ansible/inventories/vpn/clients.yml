@@ -74,7 +74,7 @@ clients:
 
 # Server configuration (reference)
 server:
-  endpoint: "8.222.187.10:54321"
+  endpoint: "8.222.187.10:13231"
   public_key: "4utg8R6pINVXmF0EilIQx2LAtndqO0plkv2kdEwf3QE="
   vpn_network: "10.66.66.0/24"
   dns: "1.1.1.1"

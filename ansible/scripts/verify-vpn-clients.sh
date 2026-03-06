@@ -155,7 +155,7 @@ verify_server_pubkey() {
 }
 
 verify_port_open() {
-    log_info "Checking VPN port (54321/udp)..."
+    log_info "Checking VPN port (13231/udp)..."
 
     local endpoint
     endpoint=$(yq e '.server.endpoint' "$INVENTORY_FILE")

@@ -5,7 +5,7 @@
 # Network configuration
 vpn_network: "10.66.66.0/24"
 vpn_server_ip: "10.66.66.1"
-vpn_port: 54321
+vpn_port: 13231
 # DNS servers for clients
 vpn_dns: "1.1.1.1"
 # Server network interface (usually eth0 on cloud VMs)
