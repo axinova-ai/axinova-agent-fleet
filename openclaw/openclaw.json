@@ -39,6 +39,7 @@
       "provider": "moonshot",
       "fallbackProviders": ["openrouter"],
       "systemPromptFile": "./task-router-prompt.md",
+      "builtinTools": [],
       "bindings": [
         {
           "channel": "discord",
