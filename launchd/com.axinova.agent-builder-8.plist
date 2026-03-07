@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.axinova.agent-backend-sde-5</string>
+    <string>com.axinova.agent-builder-8</string>
     <key>ProgramArguments</key>
     <array>
         <string>/Users/agent01/workspace/axinova-agent-fleet/scripts/agent-launcher.sh</string>
-        <string>backend-sde</string>
-        <string>/Users/agent01/workspace/axinova-mcp-server-go</string>
+        <string>builder-8</string>
+        <string>/Users/agent01/workspace</string>
         <string>120</string>
     </array>
     <key>UserName</key>
@@ -36,8 +36,8 @@
     <key>ThrottleInterval</key>
     <integer>60</integer>
     <key>StandardOutPath</key>
-    <string>/Users/agent01/logs/agent-backend-sde-5-stdout.log</string>
+    <string>/Users/agent01/logs/agent-builder-8-stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/agent01/logs/agent-backend-sde-5-stderr.log</string>
+    <string>/Users/agent01/logs/agent-builder-8-stderr.log</string>
 </dict>
 </plist>

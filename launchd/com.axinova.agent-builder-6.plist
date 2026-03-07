@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.axinova.agent-frontend-sde-3</string>
+    <string>com.axinova.agent-builder-6</string>
     <key>ProgramArguments</key>
     <array>
         <string>/Users/agent01/workspace/axinova-agent-fleet/scripts/agent-launcher.sh</string>
-        <string>frontend-sde</string>
-        <string>/Users/agent01/workspace/axinova-miniapp-builder-web</string>
+        <string>builder-6</string>
+        <string>/Users/agent01/workspace</string>
         <string>120</string>
     </array>
     <key>UserName</key>
@@ -36,8 +36,8 @@
     <key>ThrottleInterval</key>
     <integer>60</integer>
     <key>StandardOutPath</key>
-    <string>/Users/agent01/logs/agent-frontend-sde-3-stdout.log</string>
+    <string>/Users/agent01/logs/agent-builder-6-stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/agent01/logs/agent-frontend-sde-3-stderr.log</string>
+    <string>/Users/agent01/logs/agent-builder-6-stderr.log</string>
 </dict>
 </plist>

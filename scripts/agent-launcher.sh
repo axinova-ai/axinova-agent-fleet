@@ -1,26 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Agent Launcher - Polls Vikunja for tasks and executes via multi-model LLM
-# Usage: agent-launcher.sh <role> <repo-path> [poll-interval-seconds]
+# Agent Launcher - Generic builder agent that polls Vikunja for tasks
+# Usage: agent-launcher.sh <agent-id> <workspace-path> [poll-interval-seconds]
 #
-# Roles: backend-sde, frontend-sde, devops, qa-testing, tech-writer
-# Example: agent-launcher.sh backend-sde ~/workspace/axinova-home-go 120
+# All agents are generic builders — they pick up any unclaimed task.
+# The task description specifies which repo(s) to work on.
+#
+# Example: agent-launcher.sh builder-1 ~/workspace 120
 #
 # LLM Strategy (multi-model with fallback):
 #   1. Codex CLI (OpenAI ChatGPT auth) → primary coding agent (has built-in file tools)
 #   2. Kimi K2.5 (Moonshot API)        → cloud fallback (unified diff output)
 #   3. Ollama (local)                   → simple tasks (docs, lint, format)
 
-ROLE="${1:?Usage: agent-launcher.sh <role> <repo-path> [poll-interval]}"
-REPO_PATH="${2:?Usage: agent-launcher.sh <role> <repo-path> [poll-interval]}"
+AGENT_ID="${1:?Usage: agent-launcher.sh <agent-id> <workspace-path> [poll-interval]}"
+WORKSPACE="${2:?Usage: agent-launcher.sh <agent-id> <workspace-path> [poll-interval]}"
 POLL_INTERVAL="${3:-120}"
+
+# Backward compat: ROLE is used in prompts, branch names, commit messages
+ROLE="builder"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLEET_DIR="$(dirname "$SCRIPT_DIR")"
 INSTRUCTIONS_DIR="$FLEET_DIR/agent-instructions"
 LOG_DIR="$HOME/logs"
-LOG_FILE="$LOG_DIR/agent-${ROLE}.log"
+LOG_FILE="$LOG_DIR/agent-${AGENT_ID}.log"
 MCP_BIN="$HOME/workspace/axinova-mcp-server-go/bin/axinova-mcp-server"
 
 mkdir -p "$LOG_DIR"
@@ -39,23 +44,13 @@ DISCORD_WEBHOOKS_ENV="$HOME/.config/axinova/discord-webhooks.env"
 # shellcheck disable=SC1090
 [[ -f "$DISCORD_WEBHOOKS_ENV" ]] && source "$DISCORD_WEBHOOKS_ENV"
 
-# --- Agent Identity (per-role Discord avatar) ---
-get_agent_avatar() {
-  case "$1" in
-    backend-sde)  echo "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f527.png" ;;
-    frontend-sde) echo "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a8.png" ;;
-    devops)       echo "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/2699.png" ;;
-    qa-testing)   echo "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f50d.png" ;;
-    tech-writer)  echo "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f4dd.png" ;;
-    *)            echo "" ;;
-  esac
-}
-AGENT_AVATAR=$(get_agent_avatar "$ROLE")
-AGENT_USERNAME="Agent: $ROLE"
+# --- Agent Identity (Discord avatar) ---
+AGENT_AVATAR="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f528.png"  # hammer = builder
+AGENT_USERNAME="Agent: $AGENT_ID"
 
 # --- Logging ---
 log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$ROLE] $*" | tee -a "$LOG_FILE"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$AGENT_ID] $*" | tee -a "$LOG_FILE"
 }
 
 # --- Discord Notifications (with per-agent identity) ---
@@ -73,7 +68,7 @@ notify_discord() {
     --arg title "$title" \
     --arg desc "$description" \
     --argjson color "$color" \
-    --arg footer "$ROLE | $(hostname -s)" \
+    --arg footer "$AGENT_ID | $(hostname -s)" \
     '{
       username: $username,
       avatar_url: $avatar,
@@ -112,7 +107,7 @@ notify_discord_rich() {
     --arg desc "$description" \
     --argjson color "$color" \
     --argjson fields "$fields" \
-    --arg footer "$ROLE | $(hostname -s)" \
+    --arg footer "$AGENT_ID | $(hostname -s)" \
     '{
       username: $username,
       avatar_url: $avatar,
@@ -288,7 +283,7 @@ build_diff_prompt() {
   recent_log=$(git -C "$REPO_PATH" log --oneline -5 2>/dev/null || true)
 
   cat <<PROMPT
-You are a $ROLE agent working on the $repo_name repository.
+You are a builder agent working on the $repo_name repository.
 
 ## Task: $task_title
 
@@ -387,19 +382,28 @@ apply_diff() {
 }
 
 # --- Validate Setup ---
-if [[ ! -f "$INSTRUCTIONS_DIR/${ROLE}.md" ]]; then
-  log "ERROR: No instruction file found at $INSTRUCTIONS_DIR/${ROLE}.md"
+if [[ ! -f "$INSTRUCTIONS_DIR/builder.md" ]]; then
+  log "ERROR: No instruction file found at $INSTRUCTIONS_DIR/builder.md"
   exit 1
 fi
 
-if [[ ! -d "$REPO_PATH" ]]; then
-  log "ERROR: Repo path does not exist: $REPO_PATH"
+if [[ ! -d "$WORKSPACE" ]]; then
+  log "ERROR: Workspace path does not exist: $WORKSPACE"
   exit 1
 fi
 
-REPO_NAME=$(basename "$REPO_PATH")
+# Detect repo from task title/description — looks for axinova-* repo names
+# Returns the full path under WORKSPACE, or empty string if not found
+detect_repo_path() {
+  local text="$1"
+  local repo_name
+  repo_name=$(echo "$text" | grep -oE 'axinova-[a-zA-Z0-9_-]+' | head -1)
+  if [[ -n "$repo_name" && -d "$WORKSPACE/$repo_name" ]]; then
+    echo "$WORKSPACE/$repo_name"
+  fi
+}
 
-log "Starting agent: role=$ROLE repo=$REPO_NAME poll=${POLL_INTERVAL}s"
+log "Starting agent: id=$AGENT_ID workspace=$WORKSPACE poll=${POLL_INTERVAL}s"
 log "Models available: codex=$(check_codex_available && echo 'yes' || echo 'no') kimi=$([ -n "${MOONSHOT_API_KEY:-}" ] && echo 'yes' || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
 
 # --- Task Polling ---
@@ -416,14 +420,11 @@ poll_for_task() {
 
   tasks=$(vikunja_api GET "/projects/${project_id}/tasks?filter=done=false" 2>/dev/null) || { echo '{"id": 0}'; return; }
 
-  # Find first undone task with matching role label that hasn't been claimed yet
-  # (bucket_id is always 0 in task API response — kanban buckets are view-specific)
-  # Filter: has role label, not done, percent_done == 0 (unclaimed), title contains repo name
+  # Find first unclaimed task (percent_done == 0, not done)
+  # Generic pool model: any builder can pick up any task
   local task
-  task=$(echo "$tasks" | jq -r --arg role "$ROLE" --arg repo "$REPO_NAME" '
-    [.[] | select(.labels != null and (.labels[].title == $role))
-         | select(.percent_done == 0)
-         | select(.title | test($repo; "i"))] | first // {"id": 0}
+  task=$(echo "$tasks" | jq -r '
+    [.[] | select(.percent_done == 0)] | first // {"id": 0}
   ' 2>/dev/null) || { echo '{"id": 0}'; return; }
 
   echo "$task"
@@ -434,7 +435,7 @@ claim_task() {
   log "Claiming task #$task_id"
   update_vikunja_task "$task_id" "{\"percent_done\": 0.5}"
   move_to_bucket "$task_id" "$BUCKET_DOING"
-  add_task_comment "$task_id" "[CLAIMED] Agent $ROLE on $(hostname -s) picking up task"
+  add_task_comment "$task_id" "[CLAIMED] Agent $AGENT_ID on $(hostname -s) picking up task"
 }
 
 # Update Vikunja task (POST for update)
@@ -475,7 +476,11 @@ execute_wiki_task() {
   local start_time
   start_time=$(date +%s)
 
-  log "Executing wiki task #$task_id: $task_title"
+  # For wiki tasks, detect repo from task or default to agent-fleet
+  REPO_PATH=$(detect_repo_path "$task_title $task_description")
+  [[ -z "$REPO_PATH" ]] && REPO_PATH="$WORKSPACE/axinova-agent-fleet"
+  REPO_NAME=$(basename "$REPO_PATH")
+  log "Executing wiki task #$task_id: $task_title (repo: $REPO_NAME)"
   add_task_comment "$task_id" "[STARTED] Wiki task | Model: codex→kimi | SilverBullet"
 
   # Extract WIKI_PAGES: list from description (comma-separated page names)
@@ -593,12 +598,12 @@ Automated by Axinova Agent Fleet (wiki task)" 2>>"$LOG_FILE" || true
   if [[ "$execution_success" == "true" ]]; then
     if [[ "$has_git_changes" == "true" ]]; then
       # Repo changes → push + PR (then review)
-      local branch_name="agent/${ROLE}/task-${task_id}"
+      local branch_name="agent/${AGENT_ID}/task-${task_id}"
       git checkout -b "$branch_name" 2>>"$LOG_FILE" || true
       git push -u origin "$branch_name" 2>>"$LOG_FILE" || true
       local pr_url
       pr_url=$(gh pr create \
-        --title "[tech-writer] Task #${task_id}: ${task_title}" \
+        --title "[builder] Task #${task_id}: ${task_title}" \
         --body "Wiki + repo update. Vikunja task #${task_id}. Duration: ${duration_str}." \
         --base main 2>>"$LOG_FILE") || true
       local result_msg="[COMPLETED] Wiki + repo changes | Duration: ${duration_str}"
@@ -627,19 +632,29 @@ execute_task() {
   local task_id="$1"
   local task_title="$2"
   local task_description="$3"
-  local branch_name="agent/${ROLE}/task-${task_id}"
+  local branch_name="agent/${AGENT_ID}/task-${task_id}"
   local model_used="none"
   local start_time
   start_time=$(date +%s)
 
   log "Executing task #$task_id: $task_title"
 
-  # Route wiki tasks (tech-writer + WIKI_PAGES: in description) to wiki execution path
+  # Route wiki tasks to wiki execution path
   if is_wiki_task "$task_title" "$task_description"; then
     log "Detected wiki task — routing to execute_wiki_task()"
     execute_wiki_task "$task_id" "$task_title" "$task_description"
     return
   fi
+
+  # Detect which repo to work in from the task title/description
+  REPO_PATH=$(detect_repo_path "$task_title $task_description")
+  if [[ -z "$REPO_PATH" ]]; then
+    log "ERROR: Could not detect repo from task title/description"
+    escalate_task_to_founder "$task_id" "$task_title" "Could not detect target repo from task. Include a repo name like 'axinova-home-go' in the task title."
+    return
+  fi
+  REPO_NAME=$(basename "$REPO_PATH")
+  log "Detected repo: $REPO_NAME"
 
   # Create and switch to branch
   cd "$REPO_PATH"
@@ -650,13 +665,13 @@ execute_task() {
 
   # Build the prompt / instructions
   local role_instructions
-  role_instructions=$(cat "$INSTRUCTIONS_DIR/${ROLE}.md")
+  role_instructions=$(cat "$INSTRUCTIONS_DIR/builder.md")
 
   # Select model
   local selected_model
   selected_model=$(select_model "$task_title")
   log "Selected model: $selected_model"
-  add_task_comment "$task_id" "[STARTED] Model: $selected_model | Repo: $REPO_NAME"
+  add_task_comment "$task_id" "[STARTED] Model: $selected_model | Repo: $REPO_NAME | Agent: $AGENT_ID"
 
   local execution_success=false
 
@@ -665,7 +680,7 @@ execute_task() {
     log "Attempting Codex CLI execution..."
     model_used="codex-cli"
 
-    local codex_prompt="You are a $ROLE agent working on the $REPO_NAME repository.
+    local codex_prompt="You are a builder agent working on the $REPO_NAME repository.
 
 ## Task #$task_id: $task_title
 
@@ -700,9 +715,9 @@ $role_instructions
       if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
         log "Codex left uncommitted changes, auto-committing..."
         git add -A
-        git commit -m "[$ROLE] Task #$task_id: $task_title
+        git commit -m "[builder] Task #$task_id: $task_title
 
-Automated by Axinova Agent Fleet (Codex CLI)
+Automated by Axinova Agent Fleet ($AGENT_ID, Codex CLI)
 Model: codex-cli" 2>>"$LOG_FILE" || true
       fi
 
@@ -751,9 +766,9 @@ Model: codex-cli" 2>>"$LOG_FILE" || true
         # Commit the applied changes
         cd "$REPO_PATH"
         git add -A
-        local commit_msg="[$ROLE] Task #$task_id: $task_title
+        local commit_msg="[builder] Task #$task_id: $task_title
 
-Automated by Axinova Agent Fleet
+Automated by Axinova Agent Fleet ($AGENT_ID)
 Model: $model_used"
         git commit -m "$commit_msg" 2>>"$LOG_FILE" && execution_success=true
       fi
@@ -867,13 +882,13 @@ $ci_error" 2>&1) || true
 
     local pr_url
     pr_url=$(cd "$REPO_PATH" && gh pr create \
-      --title "[$ROLE] Task #$task_id: $task_title" \
+      --title "[builder] Task #$task_id: $task_title" \
       --body "$(cat <<PRBODY
 ## Task
 $task_description
 
 ## Agent
-- Role: \`$ROLE\`
+- Builder: \`$AGENT_ID\`
 - Machine: \`$(hostname -s)\`
 - Model: \`$model_used\`
 - Duration: $duration_str
@@ -973,8 +988,8 @@ check_pr_health() {
   all_prs=$(gh pr list --state open \
     --json number,title,headRefName,url,mergeable \
     2>/dev/null) || return 0
-  prs=$(echo "$all_prs" | jq --arg role "$ROLE" \
-    '[.[] | select(.headRefName | startswith("agent/"+$role+"/"))]' 2>/dev/null) || return 0
+  prs=$(echo "$all_prs" | jq --arg aid "$AGENT_ID" \
+    '[.[] | select(.headRefName | startswith("agent/"+$aid+"/"))]' 2>/dev/null) || return 0
 
   local pr_count
   pr_count=$(echo "$prs" | jq 'length' 2>/dev/null || echo "0")
@@ -1069,7 +1084,7 @@ _fix_ci_failure() {
     --jq '[.[] | select(.conclusion == "FAILURE" or .conclusion == "failure")] | .[0:3] | map(.name + ": " + .detailsUrl) | join("\n")' \
     2>/dev/null || echo "unknown")
 
-  local fix_prompt="You are a $ROLE agent. CI checks are failing on your PR.
+  local fix_prompt="You are a builder agent. CI checks are failing on your PR.
 
 ## PR: $pr_title
 ## Failing Checks:
@@ -1079,7 +1094,7 @@ $failed_checks
 1. Read the failing test/build output carefully
 2. Fix the code to make CI pass
 3. Run tests locally to verify: make test (Go) or npm run build (Node)
-4. Stage and commit with message: '[$ROLE] Fix CI failure on PR #$pr_number'
+4. Stage and commit with message: '[builder] Fix CI failure on PR #$pr_number'
 5. Do NOT push
 
 $(cat "$INSTRUCTIONS_DIR/${ROLE}.md" 2>/dev/null || true)"
@@ -1245,7 +1260,7 @@ _check_review_comments() {
   git fetch origin "$pr_branch" 2>>"$LOG_FILE" || return
   git checkout "$pr_branch" 2>>"$LOG_FILE" || return
 
-  local review_prompt="You are a $ROLE agent. A reviewer left this comment on your PR:
+  local review_prompt="You are a builder agent. A reviewer left this comment on your PR:
 
 ## PR: $pr_title
 ## Review Comment:
@@ -1262,7 +1277,7 @@ $(cat "$INSTRUCTIONS_DIR/${ROLE}.md" 2>/dev/null || true)
 ## Workflow
 1. Make the requested changes
 2. Run tests to verify
-3. Stage and commit with message: '[$ROLE] Address review feedback on PR #$pr_number'
+3. Stage and commit with message: '[builder] Address review feedback on PR #$pr_number'
 4. Do NOT push"
 
   local review_success=false
@@ -1348,14 +1363,14 @@ while true; do
     claim_task "$TASK_ID"
     notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
       "Task Claimed - #$TASK_ID" \
-      "**$TASK_TITLE**\nRole: \`$ROLE\` | Repo: \`$REPO_NAME\`" \
+      "**$TASK_TITLE**\nAgent: \`$AGENT_ID\`" \
       5814783  # blue
 
     execute_task "$TASK_ID" "$TASK_TITLE" "$TASK_DESC"
 
     notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
       "Task Complete - #$TASK_ID" \
-      "**$TASK_TITLE**\nRole: \`$ROLE\` | Repo: \`$REPO_NAME\`" \
+      "**$TASK_TITLE**\nAgent: \`$AGENT_ID\`" \
       65280  # green
 
     log "Task #$TASK_ID complete, waiting ${POLL_INTERVAL}s before next poll"
