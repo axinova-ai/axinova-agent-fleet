@@ -4,25 +4,27 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    Wei's Phone (iPhone / Android)                        │
+│  Wei's M1 MacBook Air (10.66.66.18) — PRIMARY ACCESS                    │
+│  Daily coding machine                                                    │
 │                                                                          │
-│  • Claude Code remote sessions (via M1 Workstation)                     │
-│  • Discord messages → OpenClaw → agent tasks                            │
-│  • PR review and merge approval                                        │
-│  • Available during work hours (10am-6pm)                               │
+│  • Claude Code (local) — full dev environment                           │
+│  • Direct SSH to M4/M2 Pro via VPN                                      │
+│  • Hands-on coding, PR review, task creation                            │
+│  • Git operations across all repos                                      │
 └─────────────────────────────────────────────────────────────────────────┘
            │                              │
-           │ Claude Code tunnel           │ Discord
+           │ SSH / VPN                    │ VPN (10.66.66.0/24)
            ▼                              ▼
 ┌────────────────────────┐   ┌──────────────────────────────────────────────┐
 │  M1 Workstation        │   │  M4 Mac Mini (agent01) — 10.66.66.3         │
 │  10.66.66.4 (planned)  │   │  Command Center + SDEs                      │
 │                        │   │                                              │
-│  • Claude Code server  │   │  ┌────────────────────────────────────────┐  │
-│  • Full dev environment│   │  │  OpenClaw Discord Bot                  │  │
-│  • Plan & assign tasks │   │  │  Discord → Vikunja task routing        │  │
-│  • Direct git ops      │   │  │  SOCKS5 proxy → Singapore (GFW bypass)│  │
-│  • PR review           │   │  └────────────────────────────────────────┘  │
+│  • Remote mirror of    │   │  ┌────────────────────────────────────────┐  │
+│    M1 MacBook Air      │   │  │  OpenClaw Discord Bot                  │  │
+│  • Claude Code tunnel  │   │  │  Discord → Vikunja task routing        │  │
+│    for phone access    │   │  │  SOCKS5 proxy → Singapore (GFW bypass)│  │
+│  • Limited permissions │   │  └────────────────────────────────────────┘  │
+│  • Task planning only  │   │                                              │
 └────────────────────────┘   │                                              │
                              │  ┌──────────────────────────────────────┐    │
                              │  │  Backend SDE Agents (×6)             │    │
@@ -113,16 +115,17 @@ Vikunja task marked done with PR URL
 Wei reviews PR on phone → merge → GitHub Actions CI → deploy
 ```
 
-## Task Flow: Phone → Claude Code → Agent Fleet
+## Task Flow: M1 MacBook Air → Claude Code → Agent Fleet (primary)
+
+The most productive route. Wei uses Claude Code on the M1 MacBook Air
+to directly access the entire fleet — SSH into M4/M2 Pro, create tasks,
+review PRs, and do hands-on coding.
 
 ```
-Wei's Phone (during work hours)
+Wei's M1 MacBook Air (10.66.66.18) — Daily Coding Machine
     │
-    │  SSH / Claude Code mobile
-    ▼
-M1 Workstation (Claude Code session)
-    │
-    │  Wei plans and creates tasks
+    │  Claude Code (local session)
+    │  Full dev environment + VPN access to all machines
     ▼
 ┌─────────────────────────────────────────────┐
 │  Option A: Create Vikunja task directly     │
@@ -135,16 +138,44 @@ M1 Workstation (Claude Code session)
 │  Option C: Direct git operations            │
 │  git commit, gh pr create, code review      │
 │  → Hands-on coding via Claude Code          │
+│                                             │
+│  Option D: SSH into M4/M2 Pro              │
+│  ssh agent01 / ssh focusagent02             │
+│  → Direct fleet management                 │
 └─────────────────────────────────────────────┘
+```
+
+## Task Flow: Phone → M1 Workstation → Agent Fleet (mobile)
+
+When Wei is away from the MacBook (e.g., during day job 10am-6pm),
+the M1 Workstation serves as a remote mirror with only the permissions
+needed for task planning and fleet management — not a full dev machine.
+
+```
+Wei's Phone (iPhone / Android)
+    │
+    │  Claude Code tunnel / SSH
+    ▼
+M1 Workstation (10.66.66.4) — Remote Mirror
+    │  Mirror of M1 MacBook Air setup
+    │  Limited to: task creation, PR review, fleet oversight
+    │  Not a full dev environment — just remote hands
+    ▼
+Create Vikunja tasks / Discord messages / review PRs
+    │
+    ├──→ OpenClaw (M4) ──→ Routes to appropriate agent
+    ├──→ M4 agent-launchers (10 SDEs) ──→ Backend + Frontend PRs
+    └──→ M2 agent-launchers (3 ops) ──→ DevOps + QA + Wiki
 ```
 
 ## Machine Inventory
 
 | Machine | VPN IP | Role | Services | LLM Runtime |
 |---------|--------|------|----------|-------------|
+| M1 MacBook Air | 10.66.66.18 | **Primary dev machine** | Claude Code (local), full dev env, fleet access | Claude Code |
 | M4 Mac Mini | 10.66.66.3 | Command + SDEs | OpenClaw, 6 backend SDEs, 4 frontend SDEs, console bot | Codex CLI (OpenAI) |
 | M2 Pro Mac Mini | 10.66.66.2 | Ops + QA + Wiki | DevOps, QA testing, tech writer agents | Codex CLI + Ollama |
-| M1 Workstation | 10.66.66.4 | Personal remote dev | Claude Code tunnel (planned) | Claude Code |
+| M1 Workstation | 10.66.66.4 | Remote mirror (planned) | Claude Code tunnel for phone access, limited permissions | Claude Code |
 | VPN Server | 8.222.187.10 | Network hub | AmneziaWG, SOCKS5 relay | — |
 
 ## Agent Summary

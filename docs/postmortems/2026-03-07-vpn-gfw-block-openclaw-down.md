@@ -114,9 +114,7 @@ With AmneziaWG obfuscation, the protocol isn't fingerprinted by DPI. But traffic
 | 4 | Deploy `proxy-bootstrap.cjs` + updated `openclaw-start.sh` to M4 | Done | — |
 | 5 | Update all VPN docs (PORT_CHANGE, TROUBLESHOOTING, CLIENT_SETUP) | Done | — |
 | 6 | Persist iptables rules via `iptables-persistent` | Done | — |
-| 7 | Add M2 Pro SSH key to VPN server (for future SOCKS5 needs) | Todo | Wei |
-| 8 | Consider scheduled port rotation (cron every 2 weeks) | Todo | Wei |
-| 9 | Monitor VPN throughput for early GFW throttling detection | Todo | Wei |
+| 7 | Consider port rotation if VPN drops become frequent | On hold | Wei |
 
 ---
 
