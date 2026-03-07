@@ -13,10 +13,12 @@ const CONFIG_PATH = path.join(
 
 // Built-in defaults — aliasMap in the JSON file is additive
 const BUILTIN_ALIASES = {
-  'local-general': 'qwen2.5:7b',
+  'local-general': 'qwen2.5:14b',
   'local-code': 'qwen2.5-coder:7b',
   'local-code-large': 'qwen2.5-coder:14b',
+  'local-qwen-small': 'qwen2.5:7b',
   'local-gemma': 'gemma3:4b',
+  'local-gemma-large': 'gemma3:12b',
 };
 
 let state = null;

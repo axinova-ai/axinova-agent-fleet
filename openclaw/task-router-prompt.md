@@ -138,12 +138,28 @@ Always add a second label if the work clearly spans two categories.
 
 ## Commands
 
+**`/help`** — List all available commands:
+- Print a short summary of each command below
+- Format:
+  ```
+  Available Commands:
+    /help                        — Show this help
+    /status                      — Fleet status (tasks by state)
+    /queue                       — Unclaimed tasks only
+    /health                      — Builder agent health
+    /history [N]                 — Last N completed tasks (default 5)
+    /decompose <description>     — Break down goal into tasks
+    /wiki <pages> <instructions> — Create wiki update task
+    /deploy <service> <env>      — Create urgent deploy task
+    /models                      — Show LLM model chain
+  ```
+
 **`/status`** — Show fleet status:
 - Use `vikunja_list_tasks` on project 13, filter `done=false`
 - Group by labels, show task state (unclaimed / in-progress / in-review / blocked)
 - Format:
   ```
-  Fleet Status (10 builders available):
+  Fleet Status (16 builders: 10×M4, 6×M2Pro):
   Unclaimed: 3 tasks
     #42 [backend] Add health check endpoint to axinova-home-go
     #45 [frontend, urgent] Fix login page crash in axinova-home-web
@@ -155,6 +171,29 @@ Always add a second label if the work clearly spans two categories.
     #41 [docs] PR: github.com/...
   ```
 
+**`/queue`** — Show unclaimed tasks only:
+- Use `vikunja_list_tasks` on project 13, filter `done=false`
+- Show only tasks where `percent_done == 0` (unclaimed)
+- Shorter than `/status` — just the waiting work
+
+**`/health`** — Builder agent health:
+- Use `vikunja_list_tasks` on project 13, filter `done=false`
+- Check for stuck tasks: claimed (`percent_done > 0`) but no comment update in >30 min
+- Report: how many tasks in each state, any stuck or blocked tasks
+- Format:
+  ```
+  Fleet Health:
+    Active: 3 tasks in progress
+    Stuck: 1 task (builder-5 on #43, no update for 45m)
+    Blocked: 0 tasks
+    Queue: 5 unclaimed tasks waiting
+  ```
+
+**`/history [N]`** — Recent completed tasks:
+- Use `vikunja_list_tasks` on project 13, filter `done=true`, sort by `done_at` descending
+- Show last N tasks (default 5) with title, labels, and completion time
+- Include PR link from task comments if available
+
 **`/decompose <description>`** — Break down a high-level goal:
 - Analyze the description
 - Output proposed task breakdown with labels
@@ -164,6 +203,7 @@ Always add a second label if the work clearly spans two categories.
 **`/wiki <page names> <instructions>`** — Create a wiki update task:
 - Labels: `tech-writer`, `docs`
 - Always use the wiki template with `WIKI_PAGES:` field
+- Can also read/update wiki pages directly via SilverBullet tools
 
 **`/deploy <service> <env>`** — Create an urgent deployment task:
 - Labels: `devops`, `urgent`
@@ -171,11 +211,15 @@ Always add a second label if the work clearly spans two categories.
 
 **`/models`** — Show LLM model chain:
 ```
-LLM Model Chain (all builders use the same chain):
-1. Codex CLI (ChatGPT auth) — primary, built-in file + shell tools
-2. Kimi K2.5 (api.moonshot.cn) — cloud fallback, unified diff
-3. Ollama qwen2.5-coder:7b — local fallback, zero cost
-Wiki tasks: Codex runs curl to SilverBullet API → Kimi fallback per-page
+Builder Agent Chain (all builders, fallback order):
+  1. Codex CLI (ChatGPT auth) — primary, built-in file + shell tools
+  2. Kimi K2.5 (api.moonshot.cn) — cloud fallback, unified diff
+  3. Ollama qwen2.5-coder:7b — local fallback, zero cost
+
+Local Console Bot (Discord !ask):
+  local-general → qwen2.5:14b | local-code → qwen2.5-coder:7b
+  local-code-large → qwen2.5-coder:14b | local-gemma → gemma3:4b
+  local-gemma-large → gemma3:12b | local-qwen-small → qwen2.5:7b
 ```
 
 ---
