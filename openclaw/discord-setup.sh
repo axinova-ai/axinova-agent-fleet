@@ -137,6 +137,7 @@ fi
 echo ""
 echo "→ Creating channels..."
 ID_TASKS=$(ensure_channel "$CHANNELS" "agent-tasks" "$CATEGORY_ID")
+ID_STATUS=$(ensure_channel "$CHANNELS" "agent-status" "$CATEGORY_ID")
 ID_PRS=$(ensure_channel "$CHANNELS" "agent-prs" "$CATEGORY_ID")
 ID_ALERTS=$(ensure_channel "$CHANNELS" "agent-alerts" "$CATEGORY_ID")
 ID_LOGS=$(ensure_channel "$CHANNELS" "agent-logs" "$CATEGORY_ID")
@@ -162,6 +163,7 @@ DISCORD_WEBHOOK_PRS="$WH_PRS"
 DISCORD_WEBHOOK_ALERTS="$WH_ALERTS"
 DISCORD_WEBHOOK_LOGS="$WH_LOGS"
 DISCORD_CHANNEL_TASKS="$ID_TASKS"
+DISCORD_CHANNEL_STATUS="$ID_STATUS"
 DISCORD_CHANNEL_PRS="$ID_PRS"
 DISCORD_CHANNEL_ALERTS="$ID_ALERTS"
 DISCORD_CHANNEL_LOGS="$ID_LOGS"
@@ -173,10 +175,11 @@ echo ""
 echo "Done! Channel IDs and webhook URLs saved to $ENV_FILE"
 echo ""
 echo "Channels created:"
-echo "  #agent-tasks → $ID_TASKS"
-echo "  #agent-prs   → $ID_PRS"
+echo "  #agent-tasks  → $ID_TASKS"
+echo "  #agent-status → $ID_STATUS"
+echo "  #agent-prs    → $ID_PRS"
 echo "  #agent-alerts → $ID_ALERTS"
-echo "  #agent-logs  → $ID_LOGS"
+echo "  #agent-logs   → $ID_LOGS"
 echo ""
 echo "Test a webhook:"
 echo "  source $ENV_FILE"
