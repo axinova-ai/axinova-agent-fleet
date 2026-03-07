@@ -61,7 +61,12 @@
               "vikunja_list_labels",
               "vikunja_add_task_label",
               "vikunja_add_task_labels",
-              "vikunja_remove_task_label"
+              "vikunja_remove_task_label",
+              "silverbullet_list_pages",
+              "silverbullet_get_page",
+              "silverbullet_create_page",
+              "silverbullet_update_page",
+              "silverbullet_search_pages"
             ]
           }
         }
