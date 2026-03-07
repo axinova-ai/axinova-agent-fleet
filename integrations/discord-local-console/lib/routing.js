@@ -15,6 +15,7 @@ const CONFIG_PATH = path.join(
 const BUILTIN_ALIASES = {
   'local-general': 'qwen2.5:7b',
   'local-code': 'qwen2.5-coder:7b',
+  'local-code-large': 'qwen2.5-coder:14b',
   'local-gemma': 'gemma3:4b',
 };
 

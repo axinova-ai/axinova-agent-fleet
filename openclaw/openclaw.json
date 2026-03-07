@@ -34,7 +34,7 @@
   },
   "agents": {
     "task-router": {
-      "description": "Routes Discord messages to Vikunja tasks, delegates to worker agents, handles /status and /assign commands",
+      "description": "Orchestrator: decomposes high-level goals into atomic Vikunja tasks for generic builder agents. Handles /status, /decompose, /wiki, /deploy commands.",
       "model": "moonshot/kimi-k2.5",
       "provider": "moonshot",
       "fallbackProviders": ["openrouter"],
@@ -54,59 +54,20 @@
               "vikunja_list_tasks",
               "vikunja_get_task",
               "vikunja_create_task",
+              "vikunja_create_tasks",
               "vikunja_update_task",
-              "vikunja_create_tasks"
+              "vikunja_update_tasks",
+              "vikunja_delete_task",
+              "vikunja_list_labels",
+              "vikunja_add_task_label",
+              "vikunja_add_task_labels",
+              "vikunja_remove_task_label"
             ]
           }
         }
       },
       "maxTurns": 8,
       "temperature": 0.2
-    },
-    "backend-sde": {
-      "description": "Go microservices engineer - chi v5, sqlc, PostgreSQL",
-      "model": "moonshot/kimi-k2.5",
-      "provider": "moonshot",
-      "fallbackProviders": ["openrouter"],
-      "systemPromptFile": "../agent-instructions/backend-sde.md",
-      "maxTurns": 3,
-      "temperature": 0.1
-    },
-    "frontend-sde": {
-      "description": "Vue 3 + TypeScript + Tailwind frontend engineer",
-      "model": "moonshot/kimi-k2.5",
-      "provider": "moonshot",
-      "fallbackProviders": ["openrouter"],
-      "systemPromptFile": "../agent-instructions/frontend-sde.md",
-      "maxTurns": 3,
-      "temperature": 0.1
-    },
-    "devops": {
-      "description": "Docker Compose, Traefik, CI/CD, monitoring",
-      "model": "moonshot/kimi-k2.5",
-      "provider": "moonshot",
-      "fallbackProviders": ["openrouter"],
-      "systemPromptFile": "../agent-instructions/devops.md",
-      "maxTurns": 3,
-      "temperature": 0.1
-    },
-    "qa": {
-      "description": "Testing, security scanning, code quality",
-      "model": "moonshot/kimi-k2.5",
-      "provider": "moonshot",
-      "fallbackProviders": ["openrouter"],
-      "systemPromptFile": "../agent-instructions/qa-testing.md",
-      "maxTurns": 3,
-      "temperature": 0.1
-    },
-    "tech-writer": {
-      "description": "Documentation, wiki updates, runbooks",
-      "model": "qwen2.5-coder:7b",
-      "provider": "ollama",
-      "fallbackProviders": ["moonshot"],
-      "systemPromptFile": "../agent-instructions/tech-writer.md",
-      "maxTurns": 3,
-      "temperature": 0.3
     }
   }
 }
