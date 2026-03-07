@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.axinova.agent-builder-14</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/focusagent02/workspace/axinova-agent-fleet/scripts/agent-launcher.sh</string>
+        <string>builder-14</string>
+        <string>/Users/focusagent02/workspace</string>
+        <string>120</string>
+    </array>
+    <key>UserName</key>
+    <string>focusagent02</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/focusagent02/workspace</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/focusagent02</string>
+        <key>APP_VIKUNJA__URL</key>
+        <string>http://localhost:3456</string>
+        <key>OLLAMA_HOST</key>
+        <string>http://localhost:11434</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>/Users/focusagent02/logs/agent-builder-14-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/focusagent02/logs/agent-builder-14-stderr.log</string>
+</dict>
+</plist>
