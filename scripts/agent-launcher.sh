@@ -12,7 +12,7 @@ set -euo pipefail
 # LLM Strategy (multi-model with fallback):
 #   1. Codex CLI (OpenAI ChatGPT auth) → primary coding agent (has built-in file tools)
 #   2. Kimi K2.5 (Moonshot API)        → cloud fallback (unified diff output)
-#   3. Ollama (local)                   → simple tasks (docs, lint, format)
+#   3. Ollama qwen2.5-coder:14b (local) → simple tasks + final fallback
 
 AGENT_ID="${1:?Usage: agent-launcher.sh <agent-id> <workspace-path> [poll-interval]}"
 WORKSPACE="${2:?Usage: agent-launcher.sh <agent-id> <workspace-path> [poll-interval]}"
@@ -223,7 +223,7 @@ call_kimi_api() {
 # Ollama local inference
 call_ollama() {
   local prompt="$1"
-  local model="${2:-qwen2.5-coder:7b}"
+  local model="${2:-qwen2.5-coder:14b}"
   local ollama_host="${OLLAMA_HOST:-http://localhost:11434}"
 
   local response
