@@ -77,6 +77,12 @@ clients:
     ip: 10.66.66.4
     description: "Wei's Mac Mini M1 - Personal Workstation (Claude Code remote)"
 
+  - name: wei-android-moto-one-ace
+    device_type: android
+    ip: 10.66.66.21
+    description: "Wei's Moto One Ace"
+    generate_qr: true
+
 # Server configuration (reference)
 server:
   endpoint: "8.222.187.10:39999"
