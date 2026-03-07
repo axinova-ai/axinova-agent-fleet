@@ -1,78 +1,51 @@
 {
   "$schema": "https://docs.openclaw.ai/schema/config.json",
-  "gateway": {
-    "channels": {
-      "discord": {
-        "token": "${DISCORD_BOT_TOKEN}",
-        "allowedGuilds": ["${DISCORD_SERVER_ID}"],
-        "allowedChannels": [
-          "${DISCORD_CHANNEL_TASKS}",
-          "${DISCORD_CHANNEL_STATUS}"
-        ]
+  "_comment": "This is a REFERENCE copy. The live config is at ~/.openclaw/openclaw.json on M4, managed via CLI commands below.",
+
+  "_setup_instructions": {
+    "1_install": "npm install -g openclaw@latest",
+    "2_auth_moonshot": "openclaw models auth paste-token   (paste Moonshot API key when prompted)",
+    "3_set_model": "openclaw models set moonshot/kimi-k2.5",
+    "4_set_gateway": "openclaw config set gateway.mode local",
+    "5_set_discord_policy": "openclaw config set channels.discord.groupPolicy open",
+    "6_deploy_identity": "cp openclaw/task-router-prompt.md ~/.openclaw/agents/main/agent/IDENTITY.md",
+    "7_start": "launchctl load ~/Library/LaunchAgents/com.axinova.openclaw.plist"
+  },
+
+  "_env_vars_required": {
+    "DISCORD_BOT_TOKEN": "Set in shell env or launchd plist (not sensitive — bot token, not user token)",
+    "MOONSHOT_API_KEY": "Stored via 'openclaw models auth paste-token' in ~/.openclaw/agents/main/agent/auth-profiles.json"
+  },
+
+  "_live_config_example": {
+    "agents": {
+      "defaults": {
+        "model": { "primary": "moonshot/kimi-k2.5" },
+        "compaction": { "mode": "safeguard" }
       }
     },
-    "pairing": {
-      "allowedUsers": ["${DISCORD_USER_ID}"]
+    "channels": {
+      "discord": {
+        "enabled": true,
+        "groupPolicy": "open",
+        "streaming": "off"
+      }
+    },
+    "commands": {
+      "native": "auto",
+      "nativeSkills": "auto"
+    },
+    "gateway": {
+      "mode": "local"
     }
   },
-  "providers": {
-    "moonshot": {
-      "baseUrl": "https://api.moonshot.cn/v1",
-      "apiKey": "${MOONSHOT_API_KEY}",
-      "api": "openai-completions"
-    },
-    "openrouter": {
-      "baseUrl": "https://openrouter.ai/api/v1",
-      "apiKey": "${OPENROUTER_API_KEY}",
-      "api": "openai-completions"
-    },
-    "ollama": {
-      "baseUrl": "${OLLAMA_HOST:-http://localhost:11434}/v1",
-      "apiKey": "ollama",
-      "api": "openai-completions"
-    }
-  },
-  "agents": {
-    "task-router": {
-      "description": "Orchestrator: decomposes high-level goals into atomic Vikunja tasks for generic builder agents. Handles /status, /decompose, /wiki, /deploy commands.",
-      "model": "moonshot/kimi-k2.5",
-      "provider": "moonshot",
-      "fallbackProviders": ["openrouter"],
-      "systemPromptFile": "./task-router-prompt.md",
-      "builtinTools": [],
-      "bindings": [
-        {
-          "channel": "discord",
-          "channelFilter": ["${DISCORD_CHANNEL_TASKS}", "${DISCORD_CHANNEL_STATUS}"]
-        }
-      ],
-      "tools": {
-        "mcp": {
-          "axinova-tools": {
-            "include": [
-              "vikunja_list_projects",
-              "vikunja_list_tasks",
-              "vikunja_get_task",
-              "vikunja_create_task",
-              "vikunja_create_tasks",
-              "vikunja_update_task",
-              "vikunja_update_tasks",
-              "vikunja_delete_task",
-              "vikunja_list_labels",
-              "vikunja_add_task_label",
-              "vikunja_add_task_labels",
-              "vikunja_remove_task_label",
-              "silverbullet_list_pages",
-              "silverbullet_get_page",
-              "silverbullet_create_page",
-              "silverbullet_update_page",
-              "silverbullet_search_pages"
-            ]
-          }
-        }
-      },
-      "maxTurns": 8,
-      "temperature": 0.2
-    }
+
+  "_vikunja_access": "Agent uses curl via native bash tool (no MCP). API at http://localhost:3456 via SSH tunnel. Token in ~/.config/axinova/vikunja.env",
+
+  "_identity_file": "openclaw/task-router-prompt.md → deployed to ~/.openclaw/agents/main/agent/IDENTITY.md",
+
+  "_version_history": {
+    "2026-03-02": "Initial setup with old JSON config format (providers, agents, channels keys)",
+    "2026-03-07": "Migrated to v2026.3.2 CLI-based config. Old format no longer supported."
   }
 }

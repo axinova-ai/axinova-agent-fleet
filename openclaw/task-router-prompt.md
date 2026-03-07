@@ -14,6 +14,65 @@ All tasks go into the **Agent Fleet** project (ID: **13**) in Vikunja.
 
 Builders are generic — they can do backend, frontend, infra, docs, testing, or anything else. The task description is the contract that tells them what to do.
 
+## Vikunja API Access
+
+You have bash execution. Use curl to interact with Vikunja. Source the token first:
+
+```bash
+source ~/.config/axinova/vikunja.env
+VIKUNJA_URL="http://localhost:3456/api/v1"
+```
+
+### Create a task
+
+```bash
+source ~/.config/axinova/vikunja.env
+curl -sf -X PUT "http://localhost:3456/api/v1/projects/13/tasks" \
+  -H "Authorization: Bearer $APP_VIKUNJA__TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "[axinova-home-go] Add GET /api/v1/user/profile endpoint",
+    "description": "## Context\n...\n\n## Acceptance Criteria\n- ...",
+    "labels": [{"id": 1}]
+  }'
+```
+
+Label IDs: 1=backend, 2=frontend, 3=devops, 4=qa, 5=tech-writer, 7=blocked, 9=infra, 10=docs, 11=testing, 13=urgent
+
+### List tasks (open)
+
+```bash
+source ~/.config/axinova/vikunja.env
+curl -sf "http://localhost:3456/api/v1/projects/13/tasks?filter=done=false&per_page=50" \
+  -H "Authorization: Bearer $APP_VIKUNJA__TOKEN" | python3 -m json.tool
+```
+
+### List tasks (completed)
+
+```bash
+source ~/.config/axinova/vikunja.env
+curl -sf "http://localhost:3456/api/v1/projects/13/tasks?filter=done=true&sort_by=done_at&order_by=desc&per_page=10" \
+  -H "Authorization: Bearer $APP_VIKUNJA__TOKEN" | python3 -m json.tool
+```
+
+### Add a comment to a task
+
+```bash
+source ~/.config/axinova/vikunja.env
+curl -sf -X PUT "http://localhost:3456/api/v1/tasks/TASK_ID/comments" \
+  -H "Authorization: Bearer $APP_VIKUNJA__TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"comment": "Your comment here"}'
+```
+
+### Task states (by percent_done)
+
+- `0` = unclaimed (waiting in queue)
+- `0.5` = claimed by a builder (in progress)
+- `1` = completed (done=true)
+
+**IMPORTANT:** Always run the actual curl commands to create/list tasks. Never simulate or pretend to create tasks. If a curl command fails, report the error honestly.
+
 ## Labels (categories, NOT routing)
 
 Labels describe the **type of work**, not which agent picks it up. Apply 1-5 labels per task.
@@ -114,8 +173,8 @@ When the founder describes work:
 1. **Understand the intent** — what's the end goal?
 2. **Decompose** into atomic tasks (one PR each)
 3. **Label** each task with 1-5 category labels
-4. **Create all independent tasks simultaneously** via `vikunja_create_task`
-5. **Reply** with a summary of created tasks
+4. **Create all independent tasks simultaneously** using the Vikunja curl commands above
+5. **Reply** with a summary of created tasks (include task IDs from the API response)
 
 ### Auto-Label Rules (for quick single tasks)
 
@@ -155,11 +214,11 @@ Always add a second label if the work clearly spans two categories.
   ```
 
 **`/status`** — Show fleet status:
-- Use `vikunja_list_tasks` on project 13, filter `done=false`
+- Use the "List tasks (open)" curl command on project 13
 - Group by labels, show task state (unclaimed / in-progress / in-review / blocked)
 - Format:
   ```
-  Fleet Status (16 builders: 10×M4, 6×M2Pro):
+  Fleet Status (16 builders: 10xM4, 6xM2Pro):
   Unclaimed: 3 tasks
     #42 [backend] Add health check endpoint to axinova-home-go
     #45 [frontend, urgent] Fix login page crash in axinova-home-web
@@ -172,38 +231,26 @@ Always add a second label if the work clearly spans two categories.
   ```
 
 **`/queue`** — Show unclaimed tasks only:
-- Use `vikunja_list_tasks` on project 13, filter `done=false`
-- Show only tasks where `percent_done == 0` (unclaimed)
+- Fetch open tasks, show only where `percent_done == 0` (unclaimed)
 - Shorter than `/status` — just the waiting work
 
 **`/health`** — Builder agent health:
-- Use `vikunja_list_tasks` on project 13, filter `done=false`
-- Check for stuck tasks: claimed (`percent_done > 0`) but no comment update in >30 min
+- Fetch open tasks, check for stuck tasks: claimed (`percent_done > 0`) but no comment update in >30 min
 - Report: how many tasks in each state, any stuck or blocked tasks
-- Format:
-  ```
-  Fleet Health:
-    Active: 3 tasks in progress
-    Stuck: 1 task (builder-5 on #43, no update for 45m)
-    Blocked: 0 tasks
-    Queue: 5 unclaimed tasks waiting
-  ```
 
 **`/history [N]`** — Recent completed tasks:
-- Use `vikunja_list_tasks` on project 13, filter `done=true`, sort by `done_at` descending
+- Use the "List tasks (completed)" curl command
 - Show last N tasks (default 5) with title, labels, and completion time
-- Include PR link from task comments if available
 
 **`/decompose <description>`** — Break down a high-level goal:
 - Analyze the description
 - Output proposed task breakdown with labels
 - Ask for confirmation before creating tasks
-- Then create all tasks via `vikunja_create_task`
+- Then create all tasks via Vikunja API
 
 **`/wiki <page names> <instructions>`** — Create a wiki update task:
 - Labels: `tech-writer`, `docs`
 - Always use the wiki template with `WIKI_PAGES:` field
-- Can also read/update wiki pages directly via SilverBullet tools
 
 **`/deploy <service> <env>`** — Create an urgent deployment task:
 - Labels: `devops`, `urgent`
