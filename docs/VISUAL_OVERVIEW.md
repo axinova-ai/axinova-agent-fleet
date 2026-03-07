@@ -1,382 +1,209 @@
 # Agent Fleet Visual Overview
 
-## System Architecture
+## System Architecture (as of 2026-03-07)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         Your Laptop (Control Center)                     │
+│                    Wei's Phone (iPhone / Android)                        │
 │                                                                          │
-│  • Manual code review and merge approval                                │
-│  • Strategic decisions and oversight                                     │
-│  • Access via SSH, VPN, Screen Sharing                                  │
+│  • Claude Code remote sessions (via M1 Workstation)                     │
+│  • Discord messages → OpenClaw → agent tasks                            │
+│  • PR review and merge approval                                        │
+│  • Available during work hours (10am-6pm)                               │
 └─────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     │ SSH + VPN
-                                     ▼
-        ┌────────────────────────────┴────────────────────────────┐
-        │                                                          │
-        ▼                                                          ▼
-
-┌──────────────────────────────────┐        ┌──────────────────────────────────┐
-│  M4 Mac Mini (Agent Team 1)      │◄──────►│  M2 Pro Mac Mini (Agent Team 2)  │
-│  Production Team                 │Thunderbolt  Research & Learning Team  │
-│                                  │ Bridge │                              │
-│  IP: 10.100.0.10 (VPN)           │        │  IP: 10.100.0.11 (VPN)       │
-│      169.254.100.1 (Thunderbolt) │        │      169.254.100.2           │
-│                                  │        │                              │
-│  ┌────────────────────────────┐  │        │  ┌────────────────────────┐  │
-│  │  Backend Engineer          │  │        │  │  AI Researcher         │  │
-│  │  - Go APIs, DB, Tests      │  │        │  │  - Train LLMs          │  │
-│  │  - Local CI before push    │  │        │  │  - Fine-tune models    │  │
-│  └────────────────────────────┘  │        │  │  - M2 Pro GPU (16-core)│  │
-│                                  │        │  └────────────────────────┘  │
-│  ┌────────────────────────────┐  │        │                              │
-│  │  Frontend Engineer         │  │        │  ┌────────────────────────┐  │
-│  │  - Vue 3, TypeScript       │  │        │  │  Researcher & Analyst  │  │
-│  │  - UI/UX, Build            │  │        │  │  - Market research     │  │
-│  └────────────────────────────┘  │        │  │  - Data analysis       │  │
-│                                  │        │  └────────────────────────┘  │
-│  ┌────────────────────────────┐  │        │                              │
-│  │  DevOps Engineer           │  │        │  ┌────────────────────────┐  │
-│  │  - Deploy, Monitor         │  │        │  │  Customer Support      │  │
-│  │  - Docker, Portainer       │  │        │  │  - Issues, Docs        │  │
-│  └────────────────────────────┘  │        │  └────────────────────────┘  │
-│                                  │        │                              │
-│  ┌────────────────────────────┐  │        │  ┌────────────────────────┐  │
-│  │  Product Manager           │  │        │  │  QA & Testing          │  │
-│  │  - Roadmap, Specs          │  │        │  │  - E2E, Security       │  │
-│  └────────────────────────────┘  │        │  └────────────────────────┘  │
-│                                  │        │                              │
-│  ┌────────────────────────────┐  │        │  ┌────────────────────────┐  │
-│  │  Sales & Marketing         │  │        │  │  Technical Writer      │  │
-│  │  - Ads, Campaigns          │  │        │  │  - API Docs, Runbooks  │  │
-│  └────────────────────────────┘  │        │  └────────────────────────┘  │
-│                                  │        │                              │
-└──────────────────────────────────┘        └──────────────────────────────┘
-        │                                                    │
-        │                                                    │
-        │                                                    │
-        └────────────────────────┬───────────────────────────┘
-                                 │
-                                 │ WireGuard VPN
-                                 ▼
-                    ┌────────────────────────┐
-                    │  Aliyun Singapore SAS  │
-                    │  VPN Gateway           │
-                    │  IP: 10.100.0.1        │
-                    └────────────────────────┘
-                                 │
-                                 │
-                                 ▼
-                    ┌────────────────────────┐
-                    │      GitHub            │
-                    │  - PRs from agents     │
-                    │  - CI only on main     │
-                    └────────────────────────┘
+           │                              │
+           │ Claude Code tunnel           │ Discord
+           ▼                              ▼
+┌────────────────────────┐   ┌──────────────────────────────────────────────┐
+│  M1 Workstation        │   │  M4 Mac Mini (agent01) — 10.66.66.3         │
+│  10.66.66.4 (planned)  │   │  Command Center + SDEs                      │
+│                        │   │                                              │
+│  • Claude Code server  │   │  ┌────────────────────────────────────────┐  │
+│  • Full dev environment│   │  │  OpenClaw Discord Bot                  │  │
+│  • Plan & assign tasks │   │  │  Discord → Vikunja task routing        │  │
+│  • Direct git ops      │   │  │  SOCKS5 proxy → Singapore (GFW bypass)│  │
+│  • PR review           │   │  └────────────────────────────────────────┘  │
+└────────────────────────┘   │                                              │
+                             │  ┌──────────────────────────────────────┐    │
+                             │  │  Backend SDE Agents (×6)             │    │
+                             │  │  • axinova-home-go                   │    │
+                             │  │  • axinova-ai-lab-go                 │    │
+                             │  │  • axinova-miniapp-builder-go        │    │
+                             │  │  • axinova-trading-agent-go          │    │
+                             │  │  • axinova-ai-social-publisher-go    │    │
+                             │  │  • axinova-mcp-server-go             │    │
+                             │  └──────────────────────────────────────┘    │
+                             │                                              │
+                             │  ┌──────────────────────────────────────┐    │
+                             │  │  Frontend SDE Agents (×4)            │    │
+                             │  │  • axinova-home-web                  │    │
+                             │  │  • axinova-trading-agent-web         │    │
+                             │  │  • axinova-miniapp-builder-web       │    │
+                             │  │  • axinova-ai-social-publisher-web   │    │
+                             │  └──────────────────────────────────────┘    │
+                             │                                              │
+                             │  Codex CLI + Local Console Bot               │
+                             └──────────────────────────────────────────────┘
+                                              │
+                                              │ AmneziaWG VPN
+                                              │ (10.66.66.0/24)
+                                              │
+┌──────────────────────────────────────────────┼────────────────────────────┐
+│  M2 Pro Mac Mini (focusagent02) — 10.66.66.2 │                            │
+│  Ops + QA + Wiki                             │                            │
+│                                              │                            │
+│  ┌──────────────────────────────────────┐    │  ┌──────────────────────┐  │
+│  │  DevOps Agent                       │    │  │  VPN Server          │  │
+│  │  • axinova-deploy                   │    │  │  8.222.187.10        │  │
+│  └──────────────────────────────────────┘    │  │  Singapore Aliyun    │  │
+│                                              │  │                      │  │
+│  ┌──────────────────────────────────────┐    │  │  • AmneziaWG         │  │
+│  │  QA Testing Agent                   │    │  │    (amneziawg-go)    │  │
+│  │  • axinova-home-go                  │    │  │  • Port: 39999       │  │
+│  └──────────────────────────────────────┘    │  │    (stable relay)   │  │
+│                                              │  │  • SOCKS5 relay      │  │
+│  ┌──────────────────────────────────────┐    │  │    for GFW bypass   │  │
+│  │  Tech Writer Agent                  │    │  │  • 15 VPN peers      │  │
+│  │  • SilverBullet wiki               │    │  └──────────────────────┘  │
+│  └──────────────────────────────────────┘    │                            │
+│                                              │                            │
+│  Codex CLI + Ollama (local LLM)              │                            │
+└──────────────────────────────────────────────┴────────────────────────────┘
+                             │
+                             ▼
+              ┌──────────────────────────┐
+              │      GitHub              │
+              │  axinova-ai org          │
+              │  • PRs from agents       │
+              │  • CI on merge to main   │
+              └──────────────────────────┘
 ```
 
-## Workflow: Feature Development
+## Task Flow: Discord → Code → PR
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Step 1: Task Creation                                                   │
-│                                                                          │
-│  Human → Vikunja: Create task "Add /v1/projects endpoint"               │
-│          Label: backend, Priority: 4                                     │
-└─────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Step 2: Task Assignment (Automatic)                                     │
-│                                                                          │
-│  Backend Engineer Agent (M4 mini) polls Vikunja                          │
-│  Finds task with label "backend"                                         │
-│  Claims task, updates status → "in_progress"                            │
-└─────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Step 3: Implementation                                                  │
-│                                                                          │
-│  Backend Engineer Agent:                                                 │
-│    1. Clone repo: axinova-home-go                                        │
-│    2. Create branch: agent1/projects-endpoint                            │
-│    3. Generate code: internal/api/projects.go                            │
-│    4. Write tests: internal/api/projects_test.go                         │
-│    5. Update OpenAPI spec                                                │
-└─────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Step 4: Local CI (Runs on M4 Mac Mini)                                  │
-│                                                                          │
-│  runners/local-ci/tasks/go_backend.sh:                                   │
-│    ✅ go mod tidy                                                        │
-│    ✅ go fmt ./...                                                       │
-│    ✅ go vet ./...                                                       │
-│    ✅ go test ./... -race -coverprofile=coverage.out                    │
-│    ✅ govulncheck ./...                                                  │
-│    ✅ sqlc generate (if applicable)                                      │
-│                                                                          │
-│  If all pass → Continue                                                  │
-│  If any fail → Fix issues, retry (max 3 attempts)                       │
-└─────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Step 5: Git Commit & Push                                               │
-│                                                                          │
-│  git add internal/api/projects.go internal/api/projects_test.go         │
-│  git commit -m "Add /v1/projects CRUD endpoints"                        │
-│  git push origin agent1/projects-endpoint                               │
-│                                                                          │
-│  NOTE: Push to agent1/* branch does NOT trigger GitHub Actions!         │
-└─────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Step 6: Create Pull Request                                             │
-│                                                                          │
-│  gh pr create --title "Add /v1/projects CRUD endpoints"                 │
-│               --body "Implements #123"                                   │
-│               --label "backend"                                          │
-│                                                                          │
-│  PR created by: harryxiaxia (commit: Axinova M4 Agent)                   │
-│  Assigned to: Human for review                                           │
-└─────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Step 7: Human Review (Manual)                                           │
-│                                                                          │
-│  Human reviews PR:                                                       │
-│    - Check code quality                                                  │
-│    - Verify tests pass                                                   │
-│    - Review API design                                                   │
-│    - Approve or request changes                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Step 8: Merge to Main                                                   │
-│                                                                          │
-│  gh pr merge --squash                                                    │
-│                                                                          │
-│  NOW GitHub Actions run (first and only time for this feature):         │
-│    - go test ./...                                                       │
-│    - go vet ./...                                                        │
-│    - govulncheck ./...                                                   │
-│  All pass (already validated locally) ✅                                 │
-└─────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Step 9: Deployment (Automatic or Manual)                                │
-│                                                                          │
-│  DevOps Engineer Agent picks up deployment task:                         │
-│    1. Build Docker image: ghcr.io/axinova-ai/axinova-home-go:sha-abc123 │
-│    2. Push to registry                                                   │
-│    3. Update values.yaml in axinova-deploy                               │
-│    4. Deploy to dev environment                                          │
-│    5. Run health checks                                                  │
-│    6. Update Vikunja task status → "completed"                          │
-└─────────────────────────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Step 10: Documentation (Automatic)                                      │
-│                                                                          │
-│  Technical Writer Agent:                                                 │
-│    1. Detects new API endpoint                                           │
-│    2. Updates API documentation in SilverBullet wiki                     │
-│    3. Generates OpenAPI spec                                             │
-│    4. Creates example requests/responses                                 │
-└─────────────────────────────────────────────────────────────────────────┘
+Wei sends Discord message: "Add user profile page to home-web"
+    │
+    ▼
+OpenClaw (M4) — task-router agent
+    │  Parses intent, determines role + repo
+    ▼
+Vikunja task created:
+    │  Title: "Add user profile page"
+    │  Label: frontend-sde
+    │  Project: axinova-home-web
+    ▼
+Frontend SDE agent-launcher (M4) polls Vikunja
+    │  Finds task with label "frontend-sde"
+    │  Claims task (percent_done=0.5)
+    ▼
+Codex CLI executes in axinova-home-web/
+    │  Reads: agent-instructions/frontend-sde.md
+    │  Creates: src/views/ProfileView.vue
+    │  Runs: npm run build (type check + bundle)
+    ▼
+Git operations:
+    │  Branch: agent/frontend-sde/task-<id>
+    │  Commit + push
+    │  gh pr create
+    ▼
+Vikunja task marked done with PR URL
+    │
+    ▼
+Wei reviews PR on phone → merge → GitHub Actions CI → deploy
 ```
 
-## Cost Comparison
-
-### Before Agent Fleet (Traditional CI/CD)
+## Task Flow: Phone → Claude Code → Agent Fleet
 
 ```
-┌──────────────────────────────────────────────────┐
-│ GitHub Actions (Every Push)                      │
-│                                                  │
-│  Push to feature/add-projects                    │
-│    → Trigger CI workflow                         │
-│    → Run: test, vet, build, deploy               │
-│    → Duration: ~5-10 minutes                     │
-│    → Cost: ~$0.01-0.02 per run                  │
-│                                                  │
-│  Push fix to feature/add-projects                │
-│    → Trigger CI workflow again                   │
-│    → Cost: ~$0.01-0.02 per run                  │
-│                                                  │
-│  Total for 1 feature (5-10 pushes):              │
-│    → 5-10 runs × $0.01 = $0.05-0.10             │
-│                                                  │
-│  Monthly (20 features):                          │
-│    → 100-200 runs × $0.01 = $1-2                │
-│    → Plus platform fee (starting Mar 2026):      │
-│       100-200 runs × 5 min × $0.002 = $1-2      │
-│    → Total: $2-4/month (conservative)            │
-│                                                  │
-│  Realistic estimate (larger teams):              │
-│    → $50-100/month                               │
-└──────────────────────────────────────────────────┘
+Wei's Phone (during work hours)
+    │
+    │  SSH / Claude Code mobile
+    ▼
+M1 Workstation (Claude Code session)
+    │
+    │  Wei plans and creates tasks
+    ▼
+┌─────────────────────────────────────────────┐
+│  Option A: Create Vikunja task directly     │
+│  curl -X POST vikunja.axinova-internal.xyz  │
+│  → Agent-launcher picks up automatically   │
+│                                             │
+│  Option B: Send Discord message             │
+│  → OpenClaw routes to correct agent         │
+│                                             │
+│  Option C: Direct git operations            │
+│  git commit, gh pr create, code review      │
+│  → Hands-on coding via Claude Code          │
+└─────────────────────────────────────────────┘
 ```
 
-### After Agent Fleet (Local CI First)
+## Machine Inventory
+
+| Machine | VPN IP | Role | Services | LLM Runtime |
+|---------|--------|------|----------|-------------|
+| M4 Mac Mini | 10.66.66.3 | Command + SDEs | OpenClaw, 6 backend SDEs, 4 frontend SDEs, console bot | Codex CLI (OpenAI) |
+| M2 Pro Mac Mini | 10.66.66.2 | Ops + QA + Wiki | DevOps, QA testing, tech writer agents | Codex CLI + Ollama |
+| M1 Workstation | 10.66.66.4 | Personal remote dev | Claude Code tunnel (planned) | Claude Code |
+| VPN Server | 8.222.187.10 | Network hub | AmneziaWG, SOCKS5 relay | — |
+
+## Agent Summary
+
+| Agent Role | Machine | Repos | Poll Interval | Launchd Service |
+|------------|---------|-------|--------------|-----------------|
+| backend-sde ×6 | M4 | home-go, ai-lab-go, miniapp-builder-go, trading-agent-go, ai-social-publisher-go, mcp-server-go | 120s | com.axinova.agent-backend-sde-{1-6} |
+| frontend-sde ×4 | M4 | home-web, trading-agent-web, miniapp-builder-web, ai-social-publisher-web | 120s | com.axinova.agent-frontend-sde-{1-4} |
+| devops | M2 Pro | axinova-deploy | 120s | com.axinova.agent-devops |
+| qa-testing | M2 Pro | axinova-home-go | 120s | com.axinova.agent-qa |
+| tech-writer | M2 Pro | axinova-agent-fleet (SilverBullet wiki) | 180s | com.axinova.agent-tech-writer |
+
+## VPN Network
 
 ```
-┌──────────────────────────────────────────────────┐
-│ Local CI on Mac Mini (Every Push)                │
-│                                                  │
-│  Push to agent1/add-projects (local test)        │
-│    → Run local CI on M4 mini                     │
-│    → Duration: ~3-5 minutes                      │
-│    → Cost: $0 (no GitHub minutes)               │
-│                                                  │
-│  Push fix to agent1/add-projects                 │
-│    → Run local CI again                          │
-│    → Cost: $0                                    │
-│                                                  │
-│  Merge to main (final validation)                │
-│    → GitHub Actions run ONCE                     │
-│    → Cost: ~$0.01-0.02                          │
-│                                                  │
-│  Total for 1 feature (5-10 local pushes):        │
-│    → 1 GitHub run × $0.01 = $0.01               │
-│    → Savings: 90%                                │
-│                                                  │
-│  Monthly (20 features):                          │
-│    → 20 GitHub runs × $0.01 = $0.20             │
-│    → Plus agent runtime (Anthropic API): $50     │
-│    → Total: ~$50/month                           │
-│                                                  │
-│  Net savings (vs. $100/month baseline):          │
-│    → $50/month saved                             │
-└──────────────────────────────────────────────────┘
+10.66.66.0/24 (AmneziaWG, obfuscated)
+
+  .1  — VPN Server (Singapore)
+  .2  — M2 Pro Mac Mini (focusagent02)
+  .3  — M4 Mac Mini (agent01)
+  .4  — M1 Workstation (planned)
+  .10 — Wei's iPhone
+  .11 — Lisha's MacBook Air
+  .12 — Wei's MacBook Pro
+  .13 — Wei's HP Windows
+  .14 — Wei's Xiaomi Ultra 14
+  .15 — Lisha's iPhone
+  .16 — Lisha's MacBook Air (Wei's account)
+  .17 — Lisha's Dell Windows
+  .18 — Wei's M1 MacBook Air
+  .19 — Hua's iPhone
+  .20 — Hua's Windows
+  .21 — Wei's Moto One Ace
+
+Stable relay port: UDP 39999 (iptables DNAT → internal AWG port)
+GFW bypass: AmneziaWG obfuscation + port rotation via rotate-vpn-port.sh
 ```
 
-## LLM Learning Journey Timeline
+## Key Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/agent-launcher.sh` | Core agent runtime — polls Vikunja, runs Codex, creates PRs |
+| `scripts/openclaw-start.sh` | OpenClaw launcher with SOCKS5 GFW bypass |
+| `scripts/proxy-bootstrap.cjs` | Node.js SOCKS5 proxy interceptor (no npm deps) |
+| `scripts/rotate-vpn-port.sh` | Rotate VPN internal port (zero client changes) |
+
+## Cost Model
 
 ```
-Month 1-2: Character-Level Transformer
-┌─────────────────────────────────────────────────┐
-│ Week 1: Corpus Collection                       │
-│   ✓ Scrape Axinova docs, code comments          │
-│   ✓ Clean and deduplicate                       │
-│   ✓ ~500KB-1MB text corpus                      │
-└─────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────┐
-│ Week 2: Tokenizer + Model                       │
-│   ✓ Character-level tokenizer (~200 vocab)      │
-│   ✓ 2-layer transformer architecture            │
-│   ✓ ~1M parameters                               │
-└─────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────┐
-│ Week 3-4: Training                               │
-│   ✓ Train 10 epochs on M2 Pro GPU               │
-│   ✓ Duration: ~1-2 hours                         │
-│   ✓ Perplexity: 45 → 3.2                        │
-└─────────────────────────────────────────────────┘
+Monthly Infrastructure:
+  Aliyun SAS (VPN server):    ~$5/month
+  Mac Mini M4 (electricity):  ~$3/month
+  Mac Mini M2 Pro:            ~$3/month
+  Mac Mini M1 (planned):      ~$3/month
 
-Month 3-4: Llama 3 Fine-Tuning
-┌─────────────────────────────────────────────────┐
-│ Week 5: Dataset Preparation                     │
-│   ✓ Extract 100-500 code examples                │
-│   ✓ Instruction-following format                 │
-│   ✓ Go APIs + Vue components                     │
-└─────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────┐
-│ Week 6-7: LoRA Fine-Tuning                      │
-│   ✓ Base: Llama 3 8B                             │
-│   ✓ LoRA rank: 8                                 │
-│   ✓ Train 3 epochs (~3-4 hours)                  │
-│   ✓ Only ~40M trainable params                   │
-└─────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────┐
-│ Week 8: Evaluation & Comparison                 │
-│   ✓ Code accuracy: 45% → 78%                    │
-│   ✓ ROUGE-L: 0.32 → 0.71                        │
-│   ✓ Human score: 2.5 → 4.2 / 5                  │
-└─────────────────────────────────────────────────┘
+Monthly API:
+  OpenAI Codex CLI:           ~$30-50/month (10 agents × task volume)
+  Moonshot/Kimi (OpenClaw):   ~$5-10/month (task routing only)
 
-Month 5-6: Advanced Experiments
-┌─────────────────────────────────────────────────┐
-│ • RAG pipeline (retrieve + generate)             │
-│ • Multi-task fine-tuning                         │
-│ • Continuous fine-tuning (auto-train)            │
-│ • Model quantization (4-bit GPTQ)                │
-│ • Deploy to Ollama for agent use                 │
-└─────────────────────────────────────────────────┘
+Total:                        ~$50-75/month for 13 autonomous agents
 ```
-
-## Repository Growth
-
-```
-Week 1 (Feb 7-14):
-📦 axinova-agent-fleet
-├── 📁 bootstrap/         (9 files)  - Mac setup, VPN, GitHub
-├── 📁 runners/           (7 files)  - CI scripts, deployment
-├── 📁 docs/              (7 files)  - Runbooks, architecture
-├── 📁 github/            (2 files)  - Workflow templates
-├── 📁 integrations/      (2 files)  - MCP integration
-├── 📁 scripts/           (3 files)  - SSH, fleet status
-└── 📄 Documentation      (5 files)  - README, guides, summary
-
-Total: 35 files, ~5,800 lines of code/docs
-
-Week 2-3:
-+ Agent runtime implementations
-+ LLM training scripts
-+ Vikunja task automation
-+ SilverBullet wiki templates
-
-Week 4+:
-+ Agent-generated code commits
-+ Experiment logs and results
-+ Deployment history
-+ Performance metrics
-```
-
-## Success Metrics Dashboard (Future)
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Agent Fleet Performance (Month 1)                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│ GitHub Actions Minutes:                                         │
-│   Before: ████████████████████ 500 min                         │
-│   After:  ██ 50 min                                             │
-│   Savings: 90%                                                  │
-│                                                                 │
-│ Cost:                                                           │
-│   GitHub Actions: $100/mo → $10/mo                             │
-│   Anthropic API: $50/mo                                         │
-│   Net: $40/mo savings                                           │
-│                                                                 │
-│ Agent Productivity:                                             │
-│   Tasks completed: 87 (87% of assigned)                         │
-│   PRs merged: 45 (78% without changes)                          │
-│   CI pass rate: 94%                                             │
-│                                                                 │
-│ LLM Experiments:                                                │
-│   Completed: 2 (character-level, LoRA fine-tune)                │
-│   Wiki pages: 5 (experiment logs, insights)                     │
-│   Models trained: 2 (tiny transformer, Llama 3 LoRA)            │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-This visual overview provides a high-level understanding of the agent fleet architecture, workflows, costs, and learning journey.
