@@ -159,24 +159,24 @@ add_task_comment() {
 }
 
 # --- SilverBullet API ---
-SILVERBULLET_URL="${APP_SILVERBULLET__URL:-https://wiki.axinova-internal.xyz}"
+SILVERBULLET_URL="${APP_SILVERBULLET__URL:-http://localhost:3001}"
 SILVERBULLET_TOKEN="${APP_SILVERBULLET__TOKEN:-}"
 
 silverbullet_get_page() {
   local page="$1"
   local encoded="${page// /%20}"
-  curl -sf -H "Authorization: Bearer $SILVERBULLET_TOKEN" \
-    "${SILVERBULLET_URL}/.fs/${encoded}.md" 2>/dev/null
+  curl -sfm30 -H "Authorization: Bearer $SILVERBULLET_TOKEN" \
+    "${SILVERBULLET_URL}/.fs/${encoded}.md" 2>/dev/null || true
 }
 
 silverbullet_put_page() {
   local page="$1" content="$2"
   local encoded="${page// /%20}"
-  printf '%s' "$content" | curl -sf -X PUT \
+  printf '%s' "$content" | curl -sfm30 -X PUT \
     -H "Authorization: Bearer $SILVERBULLET_TOKEN" \
     -H "Content-Type: text/plain" \
     --data-binary @- \
-    "${SILVERBULLET_URL}/.fs/${encoded}.md" 2>/dev/null
+    "${SILVERBULLET_URL}/.fs/${encoded}.md" 2>/dev/null || return 1
 }
 
 # Detect if a task is a wiki/SilverBullet task (vs. a git/code task)
@@ -260,6 +260,9 @@ select_model() {
   echo "kimi"
 }
 
+# Codex CLI model (configurable via env, default: gpt-5.3-codex)
+CODEX_MODEL="${CODEX_MODEL:-gpt-5.3-codex}"
+
 # Check if Codex CLI is available and working
 check_codex_available() {
   command -v codex >/dev/null 2>&1 || return 1
@@ -276,11 +279,20 @@ build_diff_prompt() {
   local task_description="$2"
   local role_instructions="$3"
   local repo_name="$4"
+  local task_history="${5:-}"
 
   # Gather repo context: file tree (depth 3), recent git log
   local file_tree recent_log
   file_tree=$(find "$REPO_PATH" -maxdepth 3 -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' | head -100 2>/dev/null || true)
   recent_log=$(git -C "$REPO_PATH" log --oneline -5 2>/dev/null || true)
+
+  local history_block=""
+  if [[ -n "$task_history" ]]; then
+    history_block="
+## Previous Attempts
+$task_history
+"
+  fi
 
   cat <<PROMPT
 You are a builder agent working on the $repo_name repository.
@@ -288,7 +300,7 @@ You are a builder agent working on the $repo_name repository.
 ## Task: $task_title
 
 $task_description
-
+$history_block
 ## Role Instructions
 $role_instructions
 
@@ -404,7 +416,7 @@ detect_repo_path() {
 }
 
 log "Starting agent: id=$AGENT_ID workspace=$WORKSPACE poll=${POLL_INTERVAL}s"
-log "Models available: codex=$(check_codex_available && echo 'yes' || echo 'no') kimi=$([ -n "${MOONSHOT_API_KEY:-}" ] && echo 'yes' || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
+log "Models available: codex=$(check_codex_available && echo "yes($CODEX_MODEL)" || echo 'no') kimi=$([ -n "${MOONSHOT_API_KEY:-}" ] && echo 'yes' || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
 
 # --- Task Polling ---
 poll_for_task() {
@@ -432,16 +444,56 @@ poll_for_task() {
 
 claim_task() {
   local task_id="$1"
+
+  # Random delay (0-5s) to reduce stampede when multiple builders poll simultaneously
+  local delay=$((RANDOM % 6))
+  log "Claim delay ${delay}s for task #$task_id"
+  sleep "$delay"
+
+  # Re-check if task is still unclaimed (another builder may have grabbed it)
+  local current
+  current=$(vikunja_api GET "/tasks/${task_id}" 2>/dev/null) || true
+  local current_pct
+  current_pct=$(echo "$current" | jq -r '.percent_done // 0' 2>/dev/null)
+  if [[ "$current_pct" != "0" ]]; then
+    log "Task #$task_id already claimed (percent_done=$current_pct) — skipping"
+    return 1
+  fi
+
   log "Claiming task #$task_id"
   update_vikunja_task "$task_id" "{\"percent_done\": 0.5}"
   move_to_bucket "$task_id" "$BUCKET_DOING"
   add_task_comment "$task_id" "[CLAIMED] Agent $AGENT_ID on $(hostname -s) picking up task"
+  return 0
 }
 
 # Update Vikunja task (POST for update)
+# IMPORTANT: Vikunja POST replaces ALL fields. We must preserve description/title
+# if they are not explicitly included in the update payload.
 update_vikunja_task() {
   local task_id="$1"
   local data="$2"
+
+  # If update doesn't include description, fetch and preserve existing one
+  if ! echo "$data" | grep -q '"description"'; then
+    local existing
+    existing=$(vikunja_api GET "/tasks/${task_id}" 2>/dev/null) || true
+    if [[ -n "$existing" ]]; then
+      local existing_desc existing_title
+      existing_desc=$(echo "$existing" | jq -r '.description // ""' 2>/dev/null) || true
+      existing_title=$(echo "$existing" | jq -r '.title // ""' 2>/dev/null) || true
+      # Merge: inject existing description and title into update payload
+      if [[ -n "$existing_desc" ]]; then
+        local escaped_desc
+        escaped_desc=$(echo "$existing_desc" | jq -Rs .)
+        data=$(echo "$data" | jq --argjson desc "$escaped_desc" '. + {description: $desc}')
+      fi
+      if [[ -n "$existing_title" ]] && ! echo "$data" | grep -q '"title"'; then
+        data=$(echo "$data" | jq --arg t "$existing_title" '. + {title: $t}')
+      fi
+    fi
+  fi
+
   vikunja_api POST "/tasks/${task_id}" "$data" >>"$LOG_FILE" 2>&1 || true
 }
 
@@ -452,12 +504,178 @@ move_to_bucket() {
   vikunja_api POST "/projects/13/views/52/buckets/${bucket_id}/tasks" "{\"task_id\": $task_id}" >>"$LOG_FILE" 2>&1 || true
 }
 
+# Check if task description has enough clarity for execution
+# Returns 0 if task is actionable, 1 if too vague
+# Auto-enrich a vague task description by analyzing the repo
+# Uses Codex CLI or Kimi to generate a proper description from the task title + repo context
+auto_enrich_description() {
+  local task_id="$1"
+  local task_title="$2"
+  local repo_path="$3"
+
+  log "Task #$task_id: auto-enriching description from repo context"
+  add_task_comment "$task_id" "[ENRICHING] Description is vague — analyzing repo to generate a proper task description"
+
+  local repo_name
+  repo_name=$(basename "$repo_path")
+
+  # Gather repo context
+  local repo_context=""
+
+  # Check for open PRs (useful for deps tasks)
+  local open_prs=""
+  if echo "$task_title" | grep -qiE 'dependabot|deps|consolidate'; then
+    open_prs=$(cd "$repo_path" && gh pr list --state open --limit 20 --json title,url,headRefName 2>/dev/null | jq -r '.[] | "- \(.title) (\(.headRefName))"' 2>/dev/null || true)
+  fi
+
+  # Get recent git log
+  local recent_commits
+  recent_commits=$(git -C "$repo_path" log --oneline -10 2>/dev/null || true)
+
+  # Get file tree (top-level structure)
+  local file_tree
+  file_tree=$(find "$repo_path" -maxdepth 2 -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' | head -50 2>/dev/null | sed "s|$repo_path/||" || true)
+
+  # Check for CLAUDE.md or README
+  local project_docs=""
+  [[ -f "$repo_path/CLAUDE.md" ]] && project_docs=$(head -50 "$repo_path/CLAUDE.md" 2>/dev/null)
+  [[ -z "$project_docs" && -f "$repo_path/README.md" ]] && project_docs=$(head -50 "$repo_path/README.md" 2>/dev/null)
+
+  # Build the enrichment prompt
+  local enrich_prompt="You are a task description writer for an AI agent fleet. Given this task title and repo context, write a clear, actionable task description.
+
+## Task Title
+$task_title
+
+## Repo: $repo_name
+
+### File Structure (top-level)
+$file_tree
+
+### Recent Commits
+$recent_commits
+"
+
+  if [[ -n "$open_prs" ]]; then
+    enrich_prompt+="
+### Open PRs
+$open_prs
+"
+  fi
+
+  if [[ -n "$project_docs" ]]; then
+    enrich_prompt+="
+### Project Docs (first 50 lines)
+$project_docs
+"
+  fi
+
+  enrich_prompt+="
+## Output Format
+Write a task description with these sections (plain text, no markdown headers):
+
+Context: What this task is about and why it matters.
+
+Acceptance Criteria:
+- Criterion 1
+- Criterion 2
+- ...
+
+Technical Notes: Any specific files, commands, or approaches to use.
+
+Keep it concise (under 300 words). Be specific about what files to change and what the expected outcome is."
+
+  # Try Kimi first (fast, good at analysis), then Ollama
+  local enriched=""
+  if [[ -n "${MOONSHOT_API_KEY:-}" ]]; then
+    enriched=$(call_kimi_api "$enrich_prompt" 2000) || true
+  fi
+
+  if [[ -z "$enriched" ]]; then
+    enriched=$(call_ollama "$enrich_prompt") || true
+  fi
+
+  if [[ -n "$enriched" && ${#enriched} -gt 50 ]]; then
+    # Update the task description in Vikunja
+    local escaped_desc
+    escaped_desc=$(echo "$enriched" | jq -Rs .)
+    update_vikunja_task "$task_id" "{\"description\": $escaped_desc}"
+    log "Task #$task_id: description auto-enriched (${#enriched} chars)"
+    add_task_comment "$task_id" "[ENRICHED] Auto-generated description from repo analysis. Proceeding with execution."
+    echo "$enriched"
+    return 0
+  else
+    log "Task #$task_id: auto-enrichment failed"
+    return 1
+  fi
+}
+
+check_task_clarity() {
+  local task_id="$1"
+  local task_title="$2"
+  local task_description="$3"
+
+  # Wiki tasks need WIKI_PAGES: in description — can't auto-enrich this
+  if is_wiki_task "$task_title" "$task_description"; then
+    if [[ -z "$task_description" ]] || ! echo "$task_description" | grep -q "WIKI_PAGES:"; then
+      log "Task #$task_id: wiki task but no WIKI_PAGES: in description — unclear"
+      add_task_comment "$task_id" "[BLOCKED] Wiki task requires WIKI_PAGES: field in description. Resetting to unclaimed."
+      update_vikunja_task "$task_id" '{"percent_done": 0}'
+      move_to_bucket "$task_id" "$BUCKET_TODO"
+      return 1
+    fi
+  fi
+
+  # Must contain a repo name (axinova-*) in title or description for code tasks
+  if ! is_wiki_task "$task_title" "$task_description"; then
+    if ! echo "$task_title $task_description" | grep -qE 'axinova-[a-zA-Z0-9_-]+'; then
+      log "Task #$task_id: no repo name found — cannot determine where to work"
+      add_task_comment "$task_id" "[BLOCKED] No repo name (axinova-*) found in title or description. Resetting to unclaimed."
+      update_vikunja_task "$task_id" '{"percent_done": 0}'
+      move_to_bucket "$task_id" "$BUCKET_TODO"
+      return 1
+    fi
+  fi
+
+  # Auto-enrich if description is empty or too short
+  if [[ -z "$task_description" || ${#task_description} -lt 20 ]]; then
+    log "Task #$task_id: description too short (${#task_description} chars) — attempting auto-enrichment"
+
+    # Detect repo for context
+    local repo_path
+    repo_path=$(detect_repo_path "$task_title")
+    if [[ -z "$repo_path" ]]; then
+      log "Task #$task_id: can't auto-enrich — no repo found"
+      add_task_comment "$task_id" "[BLOCKED] Task description is empty and no repo found for auto-enrichment. Resetting to unclaimed."
+      update_vikunja_task "$task_id" '{"percent_done": 0}'
+      move_to_bucket "$task_id" "$BUCKET_TODO"
+      return 1
+    fi
+
+    local enriched_desc
+    if enriched_desc=$(auto_enrich_description "$task_id" "$task_title" "$repo_path"); then
+      # Update the variable so the caller has the new description
+      # We use a global to pass back the enriched description
+      ENRICHED_TASK_DESC="$enriched_desc"
+      return 0
+    else
+      add_task_comment "$task_id" "[BLOCKED] Task description is empty and auto-enrichment failed. Please add a description manually. Resetting to unclaimed."
+      update_vikunja_task "$task_id" '{"percent_done": 0}'
+      move_to_bucket "$task_id" "$BUCKET_TODO"
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
 # Escalate task to "Needs Founder" bucket + Discord alert
 escalate_task_to_founder() {
   local task_id="$1"
   local task_title="$2"
   local reason="$3"
   log "ESCALATING task #$task_id to Needs Founder: $reason"
+  update_vikunja_task "$task_id" '{"percent_done": 0.9}'
   move_to_bucket "$task_id" "$BUCKET_NEEDS_FOUNDER"
   add_task_comment "$task_id" "[NEEDS FOUNDER] $reason"
   notify_discord "${DISCORD_WEBHOOK_ALERTS:-}" \
@@ -481,11 +699,14 @@ execute_wiki_task() {
   [[ -z "$REPO_PATH" ]] && REPO_PATH="$WORKSPACE/axinova-agent-fleet"
   REPO_NAME=$(basename "$REPO_PATH")
   log "Executing wiki task #$task_id: $task_title (repo: $REPO_NAME)"
-  add_task_comment "$task_id" "[STARTED] Wiki task | Model: codex→kimi | SilverBullet"
+  add_task_comment "$task_id" "[STARTED] Wiki task | Model: codex-cli/$CODEX_MODEL (fallback: kimi-k2.5) | Agent: $AGENT_ID"
 
   # Extract WIKI_PAGES: list from description (comma-separated page names)
+  # Strip HTML tags first since Vikunja stores descriptions as HTML
+  local plain_desc
+  plain_desc=$(echo "$task_description" | sed 's/<[^>]*>//g')
   local wiki_pages_raw=""
-  wiki_pages_raw=$(echo "$task_description" | grep -oP '(?<=WIKI_PAGES:)[^\n]+' | head -1 | tr ',' '\n' | sed 's/^ *//; s/ *$//')
+  wiki_pages_raw=$(echo "$plain_desc" | sed -n '/WIKI_PAGES:/{ s/.*WIKI_PAGES:[[:space:]]*//; p; }' | head -1 | tr ',' '\n' | sed 's/^ *//; s/ *$//')
 
   # Build context: read current page contents from SilverBullet
   local pages_context=""
@@ -603,6 +824,7 @@ Automated by Axinova Agent Fleet (wiki task)" 2>>"$LOG_FILE" || true
       git push -u origin "$branch_name" 2>>"$LOG_FILE" || true
       local pr_url
       pr_url=$(gh pr create \
+        --head "$branch_name" \
         --title "[builder] Task #${task_id}: ${task_title}" \
         --body "Wiki + repo update. Vikunja task #${task_id}. Duration: ${duration_str}." \
         --base main 2>>"$LOG_FILE") || true
@@ -663,29 +885,50 @@ execute_task() {
     git checkout "$branch_name" 2>>"$LOG_FILE" || true
   }
 
+  # Fetch task comments for context from previous attempts
+  local task_history=""
+  local comments_json
+  comments_json=$(vikunja_api GET "/tasks/$task_id/comments" 2>/dev/null) || true
+  if [[ -n "$comments_json" && "$comments_json" != "null" ]]; then
+    task_history=$(echo "$comments_json" | jq -r '.[].comment' 2>/dev/null | tail -15)
+    if [[ -n "$task_history" ]]; then
+      log "Loaded ${#task_history} chars of task history from comments"
+    fi
+  fi
+
   # Build the prompt / instructions
   local role_instructions
   role_instructions=$(cat "$INSTRUCTIONS_DIR/builder.md")
 
-  # Select model
+  # Select fallback model (only used if Codex CLI fails)
   local selected_model
   selected_model=$(select_model "$task_title")
-  log "Selected model: $selected_model"
-  add_task_comment "$task_id" "[STARTED] Model: $selected_model | Repo: $REPO_NAME | Agent: $AGENT_ID"
+  log "Fallback model: $selected_model"
 
   local execution_success=false
 
+  # Build task history section for the prompt
+  local history_section=""
+  if [[ -n "$task_history" ]]; then
+    history_section="
+## Previous Attempts (task history)
+The following comments show what previous agents tried. Learn from any failures or blocked states:
+$task_history
+"
+  fi
+
   # --- Try Codex CLI first (has built-in file tools, best for coding) ---
   if check_codex_available; then
-    log "Attempting Codex CLI execution..."
-    model_used="codex-cli"
+    log "Attempting Codex CLI execution (model: $CODEX_MODEL)..."
+    model_used="codex-cli/$CODEX_MODEL"
+    add_task_comment "$task_id" "[STARTED] Model: codex-cli/$CODEX_MODEL | Repo: $REPO_NAME | Agent: $AGENT_ID"
 
     local codex_prompt="You are a builder agent working on the $REPO_NAME repository.
 
 ## Task #$task_id: $task_title
 
 $task_description
-
+$history_section
 ## Instructions
 $role_instructions
 
@@ -704,6 +947,7 @@ $role_instructions
     local codex_output
     if codex_output=$(codex exec \
       --full-auto \
+      --model "$CODEX_MODEL" \
       -C "$REPO_PATH" \
       "$codex_prompt" \
       2>&1); then
@@ -718,7 +962,7 @@ $role_instructions
         git commit -m "[builder] Task #$task_id: $task_title
 
 Automated by Axinova Agent Fleet ($AGENT_ID, Codex CLI)
-Model: codex-cli" 2>>"$LOG_FILE" || true
+Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       fi
 
       execution_success=true
@@ -726,15 +970,17 @@ Model: codex-cli" 2>>"$LOG_FILE" || true
       echo "$codex_output" >> "$LOG_FILE"
       log "Codex CLI failed, falling back to $selected_model"
       model_used="$selected_model"
+      add_task_comment "$task_id" "[FALLBACK] Codex CLI failed, switching to $selected_model | Agent: $AGENT_ID"
     fi
   else
     model_used="$selected_model"
+    add_task_comment "$task_id" "[STARTED] Model: $selected_model (codex unavailable) | Repo: $REPO_NAME | Agent: $AGENT_ID"
   fi
 
   # --- Fallback: Kimi K2.5 or Ollama (unified diff protocol) ---
   if [[ "$execution_success" == "false" ]]; then
     local diff_prompt
-    diff_prompt=$(build_diff_prompt "$task_title" "$task_description" "$role_instructions" "$REPO_NAME")
+    diff_prompt=$(build_diff_prompt "$task_title" "$task_description" "$role_instructions" "$REPO_NAME" "$task_history")
 
     local llm_output=""
 
@@ -747,11 +993,15 @@ Model: codex-cli" 2>>"$LOG_FILE" || true
     if [[ -z "$llm_output" && "$model_used" == "kimi" ]]; then
       log "Kimi failed, falling back to Ollama"
       model_used="ollama"
+      add_task_comment "$task_id" "[FALLBACK] Kimi K2.5 failed, switching to Ollama | Agent: $AGENT_ID"
     fi
 
     if [[ "$model_used" == "ollama" || -z "$llm_output" ]]; then
       log "Calling Ollama..."
       model_used="ollama"
+      # Alert on Discord — local model usage means both cloud models failed
+      notify_discord "${DISCORD_WEBHOOK_ALERTS:-}" \
+        "⚠️ **Local model fallback** — Task #$task_id using Ollama (both Codex CLI and Kimi K2.5 unavailable). Agent: $AGENT_ID"
       llm_output=$(call_ollama "$diff_prompt") || true
     fi
 
@@ -882,6 +1132,7 @@ $ci_error" 2>&1) || true
 
     local pr_url
     pr_url=$(cd "$REPO_PATH" && gh pr create \
+      --head "$branch_name" \
       --title "[builder] Task #$task_id: $task_title" \
       --body "$(cat <<PRBODY
 ## Task
@@ -909,7 +1160,14 @@ PRBODY
       log "PR created: $pr_url"
       # Move to In Review (not Done — founder reviews the PR first)
       move_to_bucket "$task_id" "$BUCKET_IN_REVIEW"
-      update_vikunja_task "$task_id" "{\"percent_done\": 0.8}"
+      # Store PR URL in description so it's visible on Kanban board
+      local existing_desc
+      existing_desc=$(vikunja_api GET "/tasks/$task_id" 2>/dev/null | jq -r '.description // ""' 2>/dev/null || echo "")
+      local pr_note="PR: $pr_url | Model: $model_used | CI: $([ "$ci_passed" = "true" ] && echo "PASSED" || echo "FAILED")"
+      local new_desc="${existing_desc:+$existing_desc\n\n}--- Result ---\n$pr_note"
+      local escaped_desc
+      escaped_desc=$(echo -e "$new_desc" | jq -Rs .)
+      update_vikunja_task "$task_id" "{\"percent_done\": 0.8, \"description\": $escaped_desc}"
       add_task_comment "$task_id" "[IN REVIEW] PR: $pr_url | Model: $model_used | Duration: $duration_str | Commits: $has_commits | CI: $([ "$ci_passed" = "true" ] && echo "PASSED" || echo "FAILED")"
 
       # Notify Discord #agent-prs with rich embed
@@ -979,8 +1237,78 @@ This PR needs founder attention. Automatic retry limit reached." \
 }
 
 # --- PR Health Monitor ---
+# Check for recently merged PRs and auto-close corresponding Vikunja tasks
+# Runs across ALL agent PRs, not just this builder's
+check_merged_prs() {
+  # Get all repos in workspace
+  local repos
+  repos=$(find "$WORKSPACE" -maxdepth 1 -name "axinova-*" -type d 2>/dev/null)
+  [[ -z "$repos" ]] && return 0
+
+  for repo_dir in $repos; do
+    local repo_name
+    repo_name=$(basename "$repo_dir")
+    cd "$repo_dir" 2>/dev/null || continue
+
+    # List recently merged PRs with agent/ branch pattern
+    local merged_prs
+    merged_prs=$(gh pr list --state merged --limit 20 \
+      --json number,title,headRefName,mergedAt \
+      2>/dev/null) || continue
+
+    # Filter to agent PRs only
+    local agent_prs
+    agent_prs=$(echo "$merged_prs" | jq '[.[] | select(.headRefName | startswith("agent/"))]' 2>/dev/null) || continue
+
+    local count
+    count=$(echo "$agent_prs" | jq 'length' 2>/dev/null || echo "0")
+    [[ "$count" == "0" ]] && continue
+
+    echo "$agent_prs" | jq -c '.[]' | while IFS= read -r pr; do
+      local pr_branch pr_title merged_at
+      pr_branch=$(echo "$pr" | jq -r '.headRefName')
+      pr_title=$(echo "$pr" | jq -r '.title')
+      merged_at=$(echo "$pr" | jq -r '.mergedAt')
+
+      # Extract task ID from branch name: agent/builder-N/task-XXX → XXX
+      local task_id
+      task_id=$(echo "$pr_branch" | grep -oE 'task-[0-9]+' | grep -oE '[0-9]+')
+      [[ -z "$task_id" ]] && continue
+
+      # Check if we already processed this merge (avoid duplicate closures)
+      local merge_marker="$LOG_DIR/.merged-task-${task_id}"
+      [[ -f "$merge_marker" ]] && continue
+
+      # Check if the Vikunja task is still open
+      local task_json
+      task_json=$(vikunja_api GET "/tasks/$task_id" 2>/dev/null) || continue
+      local is_done
+      is_done=$(echo "$task_json" | jq -r '.done // false' 2>/dev/null)
+
+      if [[ "$is_done" == "false" ]]; then
+        log "PR merged for task #$task_id ($repo_name) — auto-closing Vikunja task"
+        update_vikunja_task "$task_id" '{"done": true, "percent_done": 1}'
+        add_task_comment "$task_id" "[DONE] PR merged by founder. Closing task automatically."
+        move_to_bucket "$task_id" "$BUCKET_DONE"
+        notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
+          "Task #$task_id auto-closed — PR merged" \
+          "**$pr_title**\nRepo: $repo_name\nMerged: $merged_at" \
+          65280  # green
+        touch "$merge_marker"
+      else
+        touch "$merge_marker"
+      fi
+    done
+  done
+}
+
 # Checks open PRs for: review comments, CI failures, merge conflicts
 check_pr_health() {
+  # REPO_PATH may not be set if no task has been executed yet this session
+  if [[ -z "${REPO_PATH:-}" ]]; then
+    log "check_pr_health: no REPO_PATH set, skipping"
+    return 0
+  fi
   cd "$REPO_PATH"
 
   # List open PRs by this agent — gh --head requires exact branch, so filter with jq
@@ -1360,7 +1688,27 @@ while true; do
 
     log "Found task #$TASK_ID: $TASK_TITLE"
 
-    claim_task "$TASK_ID"
+    # Check if task is clear enough before claiming
+    # If description is vague, auto_enrich_description will generate one
+    ENRICHED_TASK_DESC=""
+    if ! check_task_clarity "$TASK_ID" "$TASK_TITLE" "$TASK_DESC"; then
+      log "Task #$TASK_ID skipped — insufficient description and enrichment failed"
+      sleep "$POLL_INTERVAL"
+      continue
+    fi
+
+    # Use enriched description if auto-enrichment happened
+    if [[ -n "$ENRICHED_TASK_DESC" ]]; then
+      TASK_DESC="$ENRICHED_TASK_DESC"
+      log "Task #$TASK_ID: using auto-enriched description (${#TASK_DESC} chars)"
+    fi
+
+    if ! claim_task "$TASK_ID"; then
+      log "Task #$TASK_ID claimed by another builder — back to polling"
+      sleep "$POLL_INTERVAL"
+      continue
+    fi
+
     notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
       "Task Claimed - #$TASK_ID" \
       "**$TASK_TITLE**\nAgent: \`$AGENT_ID\`" \
@@ -1378,11 +1726,19 @@ while true; do
     log "No tasks found, sleeping ${POLL_INTERVAL}s"
   fi
 
-  # Run PR health check every PR_HEALTH_INTERVAL loops (independent of task availability)
+  # Check for merged PRs every loop (~2 min) — lightweight, keeps Vikunja board accurate
+  # Only one builder per machine does this (avoid 10 builders all checking)
+  if [[ "$AGENT_ID" == "builder-1" || "$AGENT_ID" == "builder-11" ]]; then
+    check_merged_prs
+  fi
+
+  # Run full PR health check (CI fix, conflict resolution, review comments) every PR_HEALTH_INTERVAL loops
   if (( _loop_count % PR_HEALTH_INTERVAL == 0 )); then
     log "Running PR health check (loop #$_loop_count)..."
     check_pr_health
   fi
 
-  sleep "$POLL_INTERVAL"
+  # Add jitter (0-15s) to prevent all builders polling at the exact same moment
+  _jitter=$((RANDOM % 16))
+  sleep $((POLL_INTERVAL + _jitter))
 done
