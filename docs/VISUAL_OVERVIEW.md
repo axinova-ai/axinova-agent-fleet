@@ -1,192 +1,177 @@
 # Agent Fleet Visual Overview
 
-## System Architecture (as of 2026-03-07)
+## Three-Tier Architecture (as of 2026-03-07)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Wei's M1 MacBook Air (10.66.66.18) — PRIMARY ACCESS                    │
-│  Daily coding machine                                                    │
+│                         FOUNDER (Wei)                                    │
 │                                                                          │
-│  • Claude Code (local) — full dev environment                           │
-│  • Direct SSH to M4/M2 Pro via VPN                                      │
-│  • Hands-on coding, PR review, task creation                            │
-│  • Git operations across all repos                                      │
-└─────────────────────────────────────────────────────────────────────────┘
-           │                              │
-           │ SSH / VPN                    │ VPN (10.66.66.0/24)
-           ▼                              ▼
-┌────────────────────────┐   ┌──────────────────────────────────────────────┐
-│  M1 Workstation        │   │  M4 Mac Mini (agent01) — 10.66.66.3         │
-│  10.66.66.4 (planned)  │   │  Command Center + SDEs                      │
-│                        │   │                                              │
-│  • Remote mirror of    │   │  ┌────────────────────────────────────────┐  │
-│    M1 MacBook Air      │   │  │  OpenClaw Discord Bot                  │  │
-│  • Claude Code tunnel  │   │  │  Discord → Vikunja task routing        │  │
-│    for phone access    │   │  │  SOCKS5 proxy → Singapore (GFW bypass)│  │
-│  • Limited permissions │   │  └────────────────────────────────────────┘  │
-│  • Task planning only  │   │                                              │
-└────────────────────────┘   │                                              │
-                             │  ┌──────────────────────────────────────┐    │
-                             │  │  Backend SDE Agents (×6)             │    │
-                             │  │  • axinova-home-go                   │    │
-                             │  │  • axinova-ai-lab-go                 │    │
-                             │  │  • axinova-miniapp-builder-go        │    │
-                             │  │  • axinova-trading-agent-go          │    │
-                             │  │  • axinova-ai-social-publisher-go    │    │
-                             │  │  • axinova-mcp-server-go             │    │
-                             │  └──────────────────────────────────────┘    │
-                             │                                              │
-                             │  ┌──────────────────────────────────────┐    │
-                             │  │  Frontend SDE Agents (×4)            │    │
-                             │  │  • axinova-home-web                  │    │
-                             │  │  • axinova-trading-agent-web         │    │
-                             │  │  • axinova-miniapp-builder-web       │    │
-                             │  │  • axinova-ai-social-publisher-web   │    │
-                             │  └──────────────────────────────────────┘    │
-                             │                                              │
-                             │  Codex CLI + Local Console Bot               │
-                             └──────────────────────────────────────────────┘
-                                              │
-                                              │ AmneziaWG VPN
-                                              │ (10.66.66.0/24)
-                                              │
-┌──────────────────────────────────────────────┼────────────────────────────┐
-│  M2 Pro Mac Mini (focusagent02) — 10.66.66.2 │                            │
-│  Ops + QA + Wiki                             │                            │
-│                                              │                            │
-│  ┌──────────────────────────────────────┐    │  ┌──────────────────────┐  │
-│  │  DevOps Agent                       │    │  │  VPN Server          │  │
-│  │  • axinova-deploy                   │    │  │  8.222.187.10        │  │
-│  └──────────────────────────────────────┘    │  │  Singapore Aliyun    │  │
-│                                              │  │                      │  │
-│  ┌──────────────────────────────────────┐    │  │  • AmneziaWG         │  │
-│  │  QA Testing Agent                   │    │  │    (amneziawg-go)    │  │
-│  │  • axinova-home-go                  │    │  │  • Port: 39999       │  │
-│  └──────────────────────────────────────┘    │  │    (stable relay)   │  │
-│                                              │  │  • SOCKS5 relay      │  │
-│  ┌──────────────────────────────────────┐    │  │    for GFW bypass   │  │
-│  │  Tech Writer Agent                  │    │  │  • 15 VPN peers      │  │
-│  │  • SilverBullet wiki               │    │  └──────────────────────┘  │
-│  └──────────────────────────────────────┘    │                            │
-│                                              │                            │
-│  Codex CLI + Ollama (local LLM)              │                            │
-└──────────────────────────────────────────────┴────────────────────────────┘
-                             │
-                             ▼
-              ┌──────────────────────────┐
-              │      GitHub              │
-              │  axinova-ai org          │
-              │  • PRs from agents       │
-              │  • CI on merge to main   │
-              └──────────────────────────┘
+│  ┌─────────────────────────────────┐  ┌──────────────────────────────┐  │
+│  │ M1 MacBook Air (10.66.66.18)   │  │ M1 Workstation (10.66.66.4) │  │
+│  │ PRIMARY — Daily coding machine │  │ MIRROR — Phone remote access │  │
+│  │                                │  │ (planned)                    │  │
+│  │ • Claude Code (local)          │  │ • Claude Code tunnel         │  │
+│  │ • Full dev env + VPN access    │  │ • Limited permissions        │  │
+│  │ • SSH to M4/M2 Pro             │  │ • Task planning + PR review  │  │
+│  │ • Git ops across all repos     │  │ • Not a full dev machine     │  │
+│  └────────────┬───────────────────┘  └──────────────┬───────────────┘  │
+│               │                                      │                  │
+│               │ Claude Code / MCP / Discord          │ Phone (10-6 job) │
+└───────────────┼──────────────────────────────────────┼──────────────────┘
+                │                                      │
+                ▼                                      ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                       ORCHESTRATOR                                       │
+│                                                                          │
+│  OpenClaw (on M4, Kimi K2.5 via Moonshot API)                           │
+│  • Receives high-level intent from Founder                               │
+│  • Decomposes into atomic tasks (one PR each)                           │
+│  • Labels for categorization (NOT routing)                               │
+│  • Creates tasks in Vikunja Project 13                                   │
+│  • Monitors stuck/blocked tasks                                          │
+│                                                                          │
+│  Entry points:                                                           │
+│    Discord message → OpenClaw → Vikunja                                  │
+│    Claude Code → MCP vikunja_create_task → Vikunja                       │
+│    Vikunja web UI → direct task creation                                  │
+└──────────────────────────────┬───────────────────────────────────────────┘
+                               │
+                    Vikunja Kanban (Project 13)
+                    Tasks labeled by category
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                       BUILDER POOL                                       │
+│                                                                          │
+│  ┌─ M4 Mac Mini (agent01, 10.66.66.3) ──────────────────────────────┐  │
+│  │  10x Generic Builders (builder-1 to builder-10)                   │  │
+│  │  Also runs: OpenClaw, Local Console Bot                           │  │
+│  │  LLM chain: Codex CLI → Kimi K2.5 → Ollama (fallback)           │  │
+│  └───────────────────────────────────────┬──────────────────────────┘  │
+│                                          │ Thunderbolt Bridge           │
+│  ┌─ M2 Pro Mac Mini (focusagent02, 10.66.66.2) ────────────────────┐  │
+│  │  6x Generic Builders (builder-11 to builder-16)                   │  │
+│  │  Ollama LLM Server (Qwen 2.5 Coder 7B)                          │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                                                                          │
+└──────────────────────────────┬───────────────────────────────────────────┘
+                               │
+                               ▼
+                ┌──────────────────────────┐
+                │      GitHub              │
+                │  axinova-ai org          │
+                │  • PRs from builders     │
+                │  • CI on merge to main   │
+                │  • Founder reviews/merges│
+                └──────────────────────────┘
 ```
 
-## Task Flow: Discord → Code → PR
+## Task Flow: Discord → OpenClaw → Builder (quick dispatch)
 
 ```
-Wei sends Discord message: "Add user profile page to home-web"
+Wei sends Discord message: "Ship user profile feature with backend API and frontend page"
     │
     ▼
-OpenClaw (M4) — task-router agent
-    │  Parses intent, determines role + repo
+OpenClaw (Orchestrator, Kimi K2.5)
+    │  Decomposes into atomic tasks, maximizes parallelism
     ▼
-Vikunja task created:
-    │  Title: "Add user profile page"
-    │  Label: frontend-sde
-    │  Project: axinova-home-web
+Vikunja tasks created simultaneously:
+    │  #42 "[axinova-home-go] Add GET /api/v1/user/profile endpoint" — label: backend
+    │  #43 "[axinova-home-go] Add PUT /api/v1/user/profile endpoint" — label: backend
+    │  #44 "[axinova-home-web] Add user profile page with edit form" — label: frontend
+    │  #45 "[axinova-home-go] Add user profile integration tests"   — label: backend, testing
     ▼
-Frontend SDE agent-launcher (M4) polls Vikunja
-    │  Finds task with label "frontend-sde"
-    │  Claims task (percent_done=0.5)
+4 generic builders claim 4 tasks in parallel
+    │  Each builder: detect repo from title → cd ~/workspace/<repo>
+    │  Read builder.md instructions + repo CLAUDE.md
+    │  Execute via Codex CLI (→ Kimi K2.5 → Ollama fallback)
+    │  Implement → test → commit
     ▼
-Codex CLI executes in axinova-home-web/
-    │  Reads: agent-instructions/frontend-sde.md
-    │  Creates: src/views/ProfileView.vue
-    │  Runs: npm run build (type check + bundle)
+agent-launcher.sh handles:
+    │  Branch: agent/builder-N/task-<id>
+    │  Push + gh pr create
+    │  Mark Vikunja task done with PR URL
     ▼
-Git operations:
-    │  Branch: agent/frontend-sde/task-<id>
-    │  Commit + push
-    │  gh pr create
-    ▼
-Vikunja task marked done with PR URL
+Wei reviews 4 PRs → merge → GitHub Actions CI → deploy
+```
+
+## Task Flow: Claude Code → MCP → Builder (design-first)
+
+```
+Wei's M1 MacBook Air — Claude Code session
     │
+    │  Design features locally, then delegate implementation
     ▼
-Wei reviews PR on phone → merge → GitHub Actions CI → deploy
-```
-
-## Task Flow: M1 MacBook Air → Claude Code → Agent Fleet (primary)
-
-The most productive route. Wei uses Claude Code on the M1 MacBook Air
-to directly access the entire fleet — SSH into M4/M2 Pro, create tasks,
-review PRs, and do hands-on coding.
-
-```
-Wei's M1 MacBook Air (10.66.66.18) — Daily Coding Machine
-    │
-    │  Claude Code (local session)
-    │  Full dev environment + VPN access to all machines
+vikunja_create_task via MCP (or curl Vikunja API)
+    │  Create task with rich description + labels
+    │  Title includes repo name: "[axinova-home-go] ..."
     ▼
-┌─────────────────────────────────────────────┐
-│  Option A: Create Vikunja task directly     │
-│  curl -X POST vikunja.axinova-internal.xyz  │
-│  → Agent-launcher picks up automatically   │
-│                                             │
-│  Option B: Send Discord message             │
-│  → OpenClaw routes to correct agent         │
-│                                             │
-│  Option C: Direct git operations            │
-│  git commit, gh pr create, code review      │
-│  → Hands-on coding via Claude Code          │
-│                                             │
-│  Option D: SSH into M4/M2 Pro              │
-│  ssh agent01 / ssh focusagent02             │
-│  → Direct fleet management                 │
-└─────────────────────────────────────────────┘
+Builder agent polls Vikunja → claims task → implements → PR
+    ▼
+Wei reviews PR in Claude Code → approve → merge
 ```
 
-## Task Flow: Phone → M1 Workstation → Agent Fleet (mobile)
-
-When Wei is away from the MacBook (e.g., during day job 10am-6pm),
-the M1 Workstation serves as a remote mirror with only the permissions
-needed for task planning and fleet management — not a full dev machine.
+## Task Flow: Phone → M1 Workstation (mobile, planned)
 
 ```
-Wei's Phone (iPhone / Android)
+Wei's Phone (during day job 10am-6pm)
     │
     │  Claude Code tunnel / SSH
     ▼
 M1 Workstation (10.66.66.4) — Remote Mirror
-    │  Mirror of M1 MacBook Air setup
     │  Limited to: task creation, PR review, fleet oversight
-    │  Not a full dev environment — just remote hands
     ▼
-Create Vikunja tasks / Discord messages / review PRs
-    │
-    ├──→ OpenClaw (M4) ──→ Routes to appropriate agent
-    ├──→ M4 agent-launchers (10 SDEs) ──→ Backend + Frontend PRs
-    └──→ M2 agent-launchers (3 ops) ──→ DevOps + QA + Wiki
+Create Vikunja tasks / Discord messages → OpenClaw → Builders
 ```
+
+## Key Design Principles
+
+### Builders are generic
+Every agent is identical — same code, same tools, same access to all repos. No specialization. A builder picks up any unclaimed task and figures out what to do from the task description.
+
+### Labels are categories, NOT routing
+Labels describe the type of work for reporting and filtering. They don't control which agent picks up a task.
+
+| Label | Use for |
+|-------|---------|
+| `backend` | Go APIs, handlers, sqlc, migrations |
+| `frontend` | Vue 3, TypeScript, PrimeVue, Tailwind |
+| `devops` | Docker, Traefik, CI/CD, deployment |
+| `infra` | Database setup, tooling, provisioning |
+| `qa` | E2E testing, release sign-off |
+| `testing` | Unit tests, integration tests, coverage |
+| `tech-writer` | Wiki, runbooks, API docs |
+| `docs` | READMEs, architecture docs |
+| `urgent` | Priority flag |
+| `blocked` | Needs human intervention |
+
+### Orchestrator always creates Vikunja tasks
+Whether the intent comes from Discord, Claude Code MCP, or the Vikunja UI — builders only consume from the Vikunja queue. OpenClaw decomposes Discord messages into Vikunja tasks. It never directly commands a builder.
+
+### One task = one PR
+The orchestrator decomposes work so each task is atomic and produces exactly one PR (or one wiki update for tech-writer tasks).
 
 ## Machine Inventory
 
-| Machine | VPN IP | Role | Services | LLM Runtime |
-|---------|--------|------|----------|-------------|
-| M1 MacBook Air | 10.66.66.18 | **Primary dev machine** | Claude Code (local), full dev env, fleet access | Claude Code |
-| M4 Mac Mini | 10.66.66.3 | Command + SDEs | OpenClaw, 6 backend SDEs, 4 frontend SDEs, console bot | Codex CLI (OpenAI) |
-| M2 Pro Mac Mini | 10.66.66.2 | Ops + QA + Wiki | DevOps, QA testing, tech writer agents | Codex CLI + Ollama |
-| M1 Workstation | 10.66.66.4 | Remote mirror (planned) | Claude Code tunnel for phone access, limited permissions | Claude Code |
+| Machine | VPN IP | Role | Services | LLM |
+|---------|--------|------|----------|-----|
+| M1 MacBook Air | 10.66.66.18 | **Founder primary** | Claude Code (local), full dev env, fleet access | Claude Code |
+| M4 Mac Mini | 10.66.66.3 | Orchestrator + Builders | OpenClaw, 10 builders (1-10), Local Console Bot | Codex CLI + Kimi K2.5 |
+| M2 Pro Mac Mini | 10.66.66.2 | Builders + LLM Server | 6 builders (11-16), Ollama (Qwen 2.5 Coder 7B) | Codex CLI + Ollama |
+| M1 Workstation | 10.66.66.4 | Founder mirror (planned) | Claude Code tunnel for phone access | Claude Code |
 | VPN Server | 8.222.187.10 | Network hub | AmneziaWG, SOCKS5 relay | — |
 
-## Agent Summary
+## Builder Agent Details
 
-| Agent Role | Machine | Repos | Poll Interval | Launchd Service |
-|------------|---------|-------|--------------|-----------------|
-| backend-sde ×6 | M4 | home-go, ai-lab-go, miniapp-builder-go, trading-agent-go, ai-social-publisher-go, mcp-server-go | 120s | com.axinova.agent-backend-sde-{1-6} |
-| frontend-sde ×4 | M4 | home-web, trading-agent-web, miniapp-builder-web, ai-social-publisher-web | 120s | com.axinova.agent-frontend-sde-{1-4} |
-| devops | M2 Pro | axinova-deploy | 120s | com.axinova.agent-devops |
-| qa-testing | M2 Pro | axinova-home-go | 120s | com.axinova.agent-qa |
-| tech-writer | M2 Pro | axinova-agent-fleet (SilverBullet wiki) | 180s | com.axinova.agent-tech-writer |
+| Component | Details |
+|-----------|---------|
+| Count | 16 total: 10 on M4 (builder-1..10), 6 on M2 Pro (builder-11..16) |
+| Instructions | `agent-instructions/builder.md` (universal) |
+| LaunchAgent | `com.axinova.agent-builder-{1..10}` |
+| Poll interval | 120s |
+| LLM chain | Codex CLI → Kimi K2.5 (Moonshot) → Ollama qwen2.5-coder:7b |
+| Repo detection | Scan task title for `axinova-*` pattern |
+| Audit trail | Vikunja task comments: `[CLAIMED] → [STARTED] → [IN REVIEW]` |
 
 ## VPN Network
 
@@ -218,7 +203,8 @@ GFW bypass: AmneziaWG obfuscation + port rotation via rotate-vpn-port.sh
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/agent-launcher.sh` | Core agent runtime — polls Vikunja, runs Codex, creates PRs |
+| `scripts/agent-launcher.sh` | Core runtime — polls Vikunja, multi-model execution, audit trail |
+| `scripts/fleet-status.sh` | Fleet health dashboard |
 | `scripts/openclaw-start.sh` | OpenClaw launcher with SOCKS5 GFW bypass |
 | `scripts/proxy-bootstrap.cjs` | Node.js SOCKS5 proxy interceptor (no npm deps) |
 | `scripts/rotate-vpn-port.sh` | Rotate VPN internal port (zero client changes) |
@@ -233,8 +219,8 @@ Monthly Infrastructure:
   Mac Mini M1 (planned):      ~$3/month
 
 Monthly API:
-  OpenAI Codex CLI:           ~$30-50/month (10 agents × task volume)
+  OpenAI Codex CLI:           ~$30-50/month (10 builders x task volume)
   Moonshot/Kimi (OpenClaw):   ~$5-10/month (task routing only)
 
-Total:                        ~$50-75/month for 13 autonomous agents
+Total:                        ~$50-75/month for 16 autonomous builders
 ```

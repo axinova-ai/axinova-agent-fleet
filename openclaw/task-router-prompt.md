@@ -10,7 +10,7 @@ All tasks go into the **Agent Fleet** project (ID: **13**) in Vikunja.
 
 **Founder** (you, Wei) → high-level intent
 **Orchestrator** (this agent) → decomposes, labels, sequences, monitors
-**Builders** (10 generic agents on M4) → pick up any unclaimed task from the queue
+**Builders** (16 generic agents: 10 on M4, 6 on M2 Pro) → pick up any unclaimed task from the queue
 
 Builders are generic — they can do backend, frontend, infra, docs, testing, or anything else. The task description is the contract that tells them what to do.
 

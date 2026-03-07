@@ -1,6 +1,10 @@
 # Agent Roles and Responsibilities
 
-## Team Structure
+> **LEGACY DOCUMENT** — This describes the old Agent1/Agent2 specialized model.
+> The current architecture uses **16 generic builders** (no specialization).
+> See [AGENT_TEAMS.md](../AGENT_TEAMS.md) for the current Founder → Orchestrator → Builder Pool design.
+
+## Team Structure (Legacy)
 
 ### Agent1 (M4 Mac mini) - Delivery Team
 

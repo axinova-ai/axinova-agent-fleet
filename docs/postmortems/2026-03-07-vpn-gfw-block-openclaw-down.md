@@ -120,25 +120,20 @@ With AmneziaWG obfuscation, the protocol isn't fingerprinted by DPI. But traffic
 
 ## Current Fleet Architecture (as of 2026-03-07)
 
-### M4 Mac Mini (agent01) — Command + Backend/Frontend SDEs
+### M4 Mac Mini (agent01) — Orchestrator + 10 Builders
 
 | Service | Count | Details |
 |---------|-------|---------|
 | OpenClaw Discord bot | 1 | Discord → Vikunja task routing (via SOCKS5 proxy) |
-| Backend SDE agents | 6 | home-go, ai-lab-go, miniapp-builder-go, trading-agent-go, ai-social-publisher-go, mcp-server-go |
-| Frontend SDE agents | 4 | home-web, trading-agent-web, miniapp-builder-web, ai-social-publisher-web |
-| Codex | 1 | Code execution engine |
-| Local console bot | 1 | Local model interface |
+| Generic builder agents | 10 | builder-1 through builder-10, any task |
+| Local console bot | 1 | Discord → Ollama direct chat |
 
-### M2 Pro Mac Mini (focusagent02) — Ops + QA + Wiki
+### M2 Pro Mac Mini (focusagent02) — 6 Builders + LLM
 
 | Service | Count | Details |
 |---------|-------|---------|
-| DevOps agent | 1 | axinova-deploy |
-| QA Testing agent | 1 | axinova-home-go |
-| Tech Writer agent | 1 | SilverBullet wiki pages |
-| Codex | 1 | Code execution engine |
-| Ollama | 1 | Local LLM inference |
+| Generic builder agents | 6 | builder-11 through builder-16, any task |
+| Ollama | 1 | Local LLM inference (Qwen 2.5 Coder 7B) |
 
 ### VPN Server (sg-vpn, 8.222.187.10) — Singapore
 
@@ -172,11 +167,11 @@ M1 Workstation (10.66.66.4)
     ▼
 Create Vikunja task / Discord message / direct git operations
     │
-    ├──→ OpenClaw (M4) ──→ Routes to appropriate agent
+    ├──→ OpenClaw (M4) ──→ Decomposes into Vikunja tasks
     │
-    ├──→ M4 agent-launchers (10 SDEs) ──→ Backend + Frontend PRs
+    ├──→ M4 builders (10 generic agents) ──→ Any task → PR
     │
-    └──→ M2 agent-launchers (3 ops) ──→ DevOps + QA + Wiki
+    └──→ M2 Pro builders (6 generic agents) ──→ Any task → PR
 ```
 
 The M1 workstation acts as Wei's remote hands — a full dev environment accessible from phone, capable of orchestrating the entire agent fleet while Wei is at the day job.

@@ -16,7 +16,7 @@ Vikunja Kanban (Project 13: Agent Fleet)
     │  Tasks labeled by category: backend, frontend, devops, etc.
     │  Builders claim any unclaimed task (generic pool)
     ▼
-Builder Pool (10 agents on M4, polling every 120s)
+Builder Pool (16 agents: 10 on M4 + 6 on M2 Pro, polling every 120s)
     │  Detect repo from task title → cd into it
     │  Codex CLI → Kimi K2.5 → Ollama (fallback chain)
     │  Implement → Test → Commit → Push → PR
@@ -31,7 +31,7 @@ Alternative entry: Claude Code → MCP vikunja_create_task → Builder
 
 ```
 ┌─ M4 Mac Mini (agent01, 16GB) ───────────────────────┐
-│  10× Builder Agents (generic, any task)              │
+│  10× Builder Agents (builder-1..10, generic)         │
 │  OpenClaw (Discord → Vikunja orchestrator)           │
 │  Local Console Bot (Discord → Ollama direct chat)    │
 │  Ollama tunnel (→ M2 Pro via Thunderbolt)            │
@@ -39,6 +39,7 @@ Alternative entry: Claude Code → MCP vikunja_create_task → Builder
 └──────────────────────────────────────────────────────┘
                 │ Thunderbolt Bridge (10.10.10.x)
 ┌─ M2 Pro Mac Mini (focusagent02, 16GB) ──────────────┐
+│  6× Builder Agents (builder-11..16, generic)         │
 │  Ollama LLM Server (Qwen 2.5 Coder 7B)              │
 │  AmneziaWG VPN (10.66.66.2)                          │
 └──────────────────────────────────────────────────────┘
@@ -157,7 +158,7 @@ scripts/
   fleet-status.sh       # Fleet health dashboard
   benchmark-ollama.sh   # Local LLM benchmark
 launchd/
-  com.axinova.agent-builder-{1..10}.plist  # 10 identical builder agents
+  com.axinova.agent-builder-{1..16}.plist  # 16 builders (1-10 M4, 11-16 M2 Pro)
   com.axinova.openclaw.plist               # Orchestrator daemon
   com.axinova.local-console-bot.plist      # Discord → Ollama chat
   com.axinova.vikunja-tunnel.plist         # SSH tunnel to Vikunja
