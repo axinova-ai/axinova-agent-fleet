@@ -125,7 +125,7 @@ notify_discord_rich() {
 }
 
 # --- Vikunja API ---
-VIKUNJA_URL="${APP_VIKUNJA__URL:-https://vikunja.axinova-internal.xyz}"
+VIKUNJA_URL="${APP_VIKUNJA__URL:-http://localhost:3456}"
 VIKUNJA_TOKEN="${APP_VIKUNJA__TOKEN:-}"
 
 # Kanban bucket IDs (project 13, kanban view 52)
@@ -154,8 +154,11 @@ add_task_comment() {
   local comment="$2"
   local timestamp
   timestamp="[$(date '+%Y-%m-%d %H:%M')]"
+  local full_comment="${timestamp} ${comment}"
+  local escaped_comment
+  escaped_comment=$(printf '%s' "$full_comment" | jq -Rs .)
   vikunja_api PUT "/tasks/${task_id}/comments" \
-    "{\"comment\":\"${timestamp} ${comment}\"}" >/dev/null 2>&1 || true
+    "{\"comment\":${escaped_comment}}" >/dev/null 2>&1 || true
 }
 
 # --- SilverBullet API ---
@@ -198,7 +201,7 @@ call_kimi_api() {
   fi
 
   local response
-  response=$(curl -sf --max-time 300 \
+  response=$(curl -sf --max-time 600 \
     "https://api.moonshot.cn/v1/chat/completions" \
     -H "Authorization: Bearer $MOONSHOT_API_KEY" \
     -H "Content-Type: application/json" \
@@ -217,7 +220,24 @@ call_kimi_api() {
     return 1
   fi
 
-  echo "$response" | jq -r '.choices[0].message.content // empty'
+  # kimi-k2.5 is a reasoning model: puts thinking in reasoning_content, answer in content.
+  # If max_tokens is exhausted on reasoning, content is "" (empty string, not null).
+  # jq's // operator only matches null, so we must explicitly check for empty string.
+  local content
+  content=$(echo "$response" | jq -r '.choices[0].message.content // ""')
+  local finish_reason
+  finish_reason=$(echo "$response" | jq -r '.choices[0].finish_reason // ""')
+
+  if [[ -z "$content" ]]; then
+    if [[ "$finish_reason" == "length" ]]; then
+      log "ERROR: Kimi API exhausted max_tokens=$max_tokens on reasoning (content empty, finish_reason=length)"
+    else
+      log "ERROR: Kimi API returned empty content (finish_reason=$finish_reason)"
+    fi
+    return 1
+  fi
+
+  echo "$content"
 }
 
 # Ollama local inference
@@ -260,14 +280,75 @@ select_model() {
   echo "kimi"
 }
 
+
+# Estimate task complexity to decide if it should be auto-escalated to founder
+estimate_complexity() {
+  local title="$1" desc="$2"
+  local score=0
+  local text="$title $desc"
+
+  # Multi-component signals (+2 each)
+  echo "$text" | grep -qiE 'wizard|onboarding|migration|refactor|redesign|admin panel' && score=$((score + 2))
+  echo "$text" | grep -qiE 'multi.*(step|page|component|file)' && score=$((score + 2))
+
+  # Scope signals (+1 each)
+  echo "$text" | grep -qiE 'crud|handler.*route|middleware' && score=$((score + 1))
+  echo "$text" | grep -qiE 'upload|oss|payment|security' && score=$((score + 1))
+
+  # Acceptance criteria count (+2 if >5 items)
+  local criteria_count
+  criteria_count=$(echo "$desc" | grep -ciE '^[[:space:]]*[-*][[:space:]]|<li>' || echo 0)
+  [[ "$criteria_count" -gt 5 ]] && score=$((score + 2))
+
+  # Multiple file references (+1 if >3)
+  local file_count
+  file_count=$(echo "$desc" | grep -coE '.(vue|go|ts|sql)' || echo 0)
+  [[ "$file_count" -gt 3 ]] && score=$((score + 1))
+
+  echo "$score"
+}
 # Codex CLI model (configurable via env, default: gpt-5.3-codex)
 CODEX_MODEL="${CODEX_MODEL:-gpt-5.3-codex}"
+CODEX_TIMEOUT="${CODEX_TIMEOUT:-600}"  # 10 min timeout (complex multi-file tasks need more time)
+
+# Portable timeout: macOS has no GNU timeout, use perl fallback
+_timeout() {
+  local secs="$1"; shift
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  else
+    # perl-based timeout for macOS
+    perl -e '
+      alarm shift @ARGV;
+      $SIG{ALRM} = sub { kill 9, $pid; exit 124 };
+      $pid = fork // die;
+      if ($pid == 0) { exec @ARGV; die "exec: $!" }
+      waitpid $pid, 0;
+      exit ($? >> 8);
+    ' "$secs" "$@"
+  fi
+}
 
 # Check if Codex CLI is available and working
 check_codex_available() {
   command -v codex >/dev/null 2>&1 || return 1
   # Codex is installed — we try it as primary
   return 0
+}
+
+# --- Codex Audit Logging ---
+# Structured JSONL audit log for every Codex invocation
+CODEX_AUDIT_LOG="$LOG_DIR/codex-audit.jsonl"
+
+log_codex_audit() {
+  local task_id="$1"
+  local invocation_type="$2"  # initial|ci-fix|pr-ci-fix|review-fix|wiki
+  local exit_code="$3"
+  local duration_secs="$4"
+  local pr_number="${5:-}"
+  echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"agent\":\"$AGENT_ID\",\"task_id\":\"$task_id\",\"type\":\"$invocation_type\",\"model\":\"$CODEX_MODEL\",\"exit_code\":$exit_code,\"duration_secs\":$duration_secs,\"pr\":\"$pr_number\",\"host\":\"$(hostname -s)\"}" >> "$CODEX_AUDIT_LOG"
 }
 
 # --- Unified Diff Protocol ---
@@ -419,76 +500,91 @@ log "Starting agent: id=$AGENT_ID workspace=$WORKSPACE poll=${POLL_INTERVAL}s"
 log "Models available: codex=$(check_codex_available && echo "yes($CODEX_MODEL)" || echo 'no') kimi=$([ -n "${MOONSHOT_API_KEY:-}" ] && echo 'yes' || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
 
 # --- Task Polling ---
+# Uses the Kanban view API to fetch ONLY tasks in the To-Do bucket.
+# Any task in To-Do (regardless of percent_done) is eligible for pickup.
+# Tasks in Doing/Done/In Review/Needs Founder are NOT picked up.
+KANBAN_VIEW_ID=52
+
 poll_for_task() {
-  local projects tasks project_id
+  # The view tasks API returns: [{id: bucket_id, title: "To-Do", tasks: [...]}, ...]
+  # We extract only tasks from the To-Do bucket (id=35)
+  # Only pick tasks with percent_done=0 (unclaimed, not escalated).
+  # Shuffle the list so agents don't all grab the same first task.
+  local view_data
+  view_data=$(vikunja_api GET "/projects/13/views/${KANBAN_VIEW_ID}/tasks?per_page=50" 2>/dev/null) || { echo '{"id": 0}'; return; }
 
-  projects=$(vikunja_api GET "/projects" 2>/dev/null) || { echo '{"id": 0}'; return; }
-  project_id=$(echo "$projects" | jq -r '.[] | select(.title == "Agent Fleet") | .id // empty' 2>/dev/null)
+  local candidates
+  candidates=$(echo "$view_data" | jq -c --argjson todo "$BUCKET_TODO" '
+    [.[] | select(.id == $todo) | .tasks[]? | select(.done == false and .percent_done == 0)]
+  ' 2>/dev/null) || { echo '{"id": 0}'; return; }
 
-  if [[ -z "$project_id" ]]; then
+  local count
+  count=$(echo "$candidates" | jq 'length' 2>/dev/null || echo "0")
+
+  if [[ "$count" -eq 0 || "$count" == "null" ]]; then
     echo '{"id": 0}'
     return
   fi
 
-  tasks=$(vikunja_api GET "/projects/${project_id}/tasks?filter=done=false" 2>/dev/null) || { echo '{"id": 0}'; return; }
-
-  # Find first unclaimed task (percent_done == 0, not done)
-  # Generic pool model: any builder can pick up any task
-  local task
-  task=$(echo "$tasks" | jq -r '
-    [.[] | select(.percent_done == 0)] | first // {"id": 0}
-  ' 2>/dev/null) || { echo '{"id": 0}'; return; }
-
-  echo "$task"
+  # Pick a random task to distribute work across available tasks
+  local idx=$(( RANDOM % count ))
+  echo "$candidates" | jq -c ".[$idx]"
 }
 
 claim_task() {
   local task_id="$1"
 
-  # Random delay (0-5s) to reduce stampede when multiple builders poll simultaneously
-  local delay=$((RANDOM % 6))
+  # Random delay (1-15s) to reduce stampede when multiple builders poll simultaneously.
+  # With 16 agents, 0-5s wasn't enough — agents still race on the same task.
+  local delay=$(( (RANDOM % 15) + 1 ))
   log "Claim delay ${delay}s for task #$task_id"
   sleep "$delay"
 
-  # Re-check if task is still unclaimed (another builder may have grabbed it)
+  # Re-check: if another builder already claimed (0.5), started (0.9), or escalated,
+  # skip it. Only pick up tasks at exactly percent_done=0.
   local current
   current=$(vikunja_api GET "/tasks/${task_id}" 2>/dev/null) || true
   local current_pct
   current_pct=$(echo "$current" | jq -r '.percent_done // 0' 2>/dev/null)
   if [[ "$current_pct" != "0" ]]; then
-    log "Task #$task_id already claimed (percent_done=$current_pct) — skipping"
+    log "Task #$task_id already in progress or escalated (percent_done=$current_pct) — skipping"
     return 1
   fi
 
-  log "Claiming task #$task_id"
+  log "Claiming task #$task_id (was at percent_done=$current_pct)"
   update_vikunja_task "$task_id" "{\"percent_done\": 0.5}"
   move_to_bucket "$task_id" "$BUCKET_DOING"
-  add_task_comment "$task_id" "[CLAIMED] Agent $AGENT_ID on $(hostname -s) picking up task"
+  add_task_comment "$task_id" "[CLAIMED] Agent $AGENT_ID on $(hostname -s) picking up task (previous progress: ${current_pct})"
   return 0
 }
 
 # Update Vikunja task (POST for update)
 # IMPORTANT: Vikunja POST replaces ALL fields. We must preserve description/title
 # if they are not explicitly included in the update payload.
+# FIX: Use jq --arg (not --argjson) to avoid double-escaping HTML descriptions.
 update_vikunja_task() {
   local task_id="$1"
   local data="$2"
 
-  # If update doesn't include description, fetch and preserve existing one
-  if ! echo "$data" | grep -q '"description"'; then
-    local existing
-    existing=$(vikunja_api GET "/tasks/${task_id}" 2>/dev/null) || true
-    if [[ -n "$existing" ]]; then
-      local existing_desc existing_title
+  # Fetch existing task to preserve fields not in the update payload
+  local existing
+  existing=$(vikunja_api GET "/tasks/${task_id}" 2>/dev/null) || true
+
+  if [[ -n "$existing" ]]; then
+    # Always preserve description unless explicitly provided in the update
+    if ! echo "$data" | grep -q '"description"'; then
+      local existing_desc
       existing_desc=$(echo "$existing" | jq -r '.description // ""' 2>/dev/null) || true
-      existing_title=$(echo "$existing" | jq -r '.title // ""' 2>/dev/null) || true
-      # Merge: inject existing description and title into update payload
       if [[ -n "$existing_desc" ]]; then
-        local escaped_desc
-        escaped_desc=$(echo "$existing_desc" | jq -Rs .)
-        data=$(echo "$data" | jq --argjson desc "$escaped_desc" '. + {description: $desc}')
+        # Use --arg (not --argjson) to safely inject the raw string without double-escaping
+        data=$(echo "$data" | jq --arg desc "$existing_desc" '. + {description: $desc}')
       fi
-      if [[ -n "$existing_title" ]] && ! echo "$data" | grep -q '"title"'; then
+    fi
+    # Always preserve title unless explicitly provided
+    if ! echo "$data" | grep -q '"title"'; then
+      local existing_title
+      existing_title=$(echo "$existing" | jq -r '.title // ""' 2>/dev/null) || true
+      if [[ -n "$existing_title" ]]; then
         data=$(echo "$data" | jq --arg t "$existing_title" '. + {title: $t}')
       fi
     fi
@@ -753,11 +849,23 @@ ${pages_context}
 4. \`git commit\` any repo changes (message: '[tech-writer] Task #${task_id}: ${task_title}')
 5. Do NOT push"
 
-    if codex exec --full-auto -C "$REPO_PATH" "$codex_prompt" >>"$LOG_FILE" 2>&1; then
-      log "Codex wiki task completed"
+    local wiki_codex_start wiki_codex_end wiki_codex_exit
+    wiki_codex_start=$(date +%s)
+    if _timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$REPO_PATH" "$codex_prompt" >>"$LOG_FILE" 2>&1; then
+      wiki_codex_exit=0
+      wiki_codex_end=$(date +%s)
+      log_codex_audit "$task_id" "wiki" "0" "$((wiki_codex_end - wiki_codex_start))"
+      log "Codex wiki task completed ($((wiki_codex_end - wiki_codex_start))s)"
       execution_success=true
     else
-      log "Codex wiki task failed, falling back to Kimi"
+      wiki_codex_exit=$?
+      wiki_codex_end=$(date +%s)
+      log_codex_audit "$task_id" "wiki" "$wiki_codex_exit" "$((wiki_codex_end - wiki_codex_start))"
+      if [[ "$wiki_codex_exit" -eq 124 ]]; then
+        log "Codex wiki task TIMED OUT after ${CODEX_TIMEOUT}s, falling back to Kimi"
+      else
+        log "Codex wiki task failed (exit $wiki_codex_exit), falling back to Kimi"
+      fi
     fi
   fi
 
@@ -828,7 +936,7 @@ Automated by Axinova Agent Fleet (wiki task)" 2>>"$LOG_FILE" || true
         --title "[builder] Task #${task_id}: ${task_title}" \
         --body "Wiki + repo update. Vikunja task #${task_id}. Duration: ${duration_str}." \
         --base main 2>>"$LOG_FILE") || true
-      local result_msg="[COMPLETED] Wiki + repo changes | Duration: ${duration_str}"
+      local result_msg="[COMPLETED] Wiki + repo changes | Model: codex-cli/$CODEX_MODEL | Duration: ${duration_str} | Agent: $AGENT_ID"
       [[ -n "$pr_url" ]] && result_msg+=" | PR: $pr_url"
       move_to_bucket "$task_id" "$BUCKET_IN_REVIEW"
       add_task_comment "$task_id" "$result_msg"
@@ -836,7 +944,11 @@ Automated by Axinova Agent Fleet (wiki task)" 2>>"$LOG_FILE" || true
       # Wiki-only → move straight to Done
       move_to_bucket "$task_id" "$BUCKET_DONE"
       update_vikunja_task "$task_id" '{"done": true}'
-      add_task_comment "$task_id" "[COMPLETED] Wiki updated | Duration: ${duration_str} | Pages: ${#page_list[@]}"
+      local page_names
+      page_names=$(printf '%s, ' "${page_list[@]}" | sed 's/, $//')
+      local wiki_urls
+      wiki_urls=$(for p in "${page_list[@]}"; do echo "${SILVERBULLET_URL}/.fs/${p// /%20}.md"; done | tr '\n' ' ')
+      add_task_comment "$task_id" "[COMPLETED] Wiki updated | Model: codex-cli/$CODEX_MODEL | Duration: ${duration_str} | Pages: ${page_names} | Agent: $AGENT_ID | URLs: ${wiki_urls}"
     fi
     notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
       "Wiki Task Done - #${task_id}" \
@@ -942,17 +1054,27 @@ $role_instructions
 - Follow the existing code conventions in this repository
 - Read CLAUDE.md in the repo root for project-specific guidance
 - Keep changes focused on the task - don't refactor unrelated code
-- If tests fail, fix them before committing"
+- If tests fail, fix them before committing
+- Your commit message MUST reference Task #$task_id (not any other task number)
+- Use commit message format: '[builder] Task #$task_id: <description>'
+- ONLY create or modify files directly related to the task title
+- Do NOT create views, components, or handlers for features not mentioned in the task
+- If you need a dependency that doesn't exist yet, leave a TODO comment instead of implementing it"
 
     local codex_output
-    if codex_output=$(codex exec \
+    local codex_start codex_end codex_exit
+    codex_start=$(date +%s)
+    if codex_output=$(_timeout "$CODEX_TIMEOUT" codex exec \
       --full-auto \
       --model "$CODEX_MODEL" \
       -C "$REPO_PATH" \
       "$codex_prompt" \
       2>&1); then
+      codex_exit=$?
+      codex_end=$(date +%s)
+      log_codex_audit "$task_id" "initial" "$codex_exit" "$((codex_end - codex_start))"
       echo "$codex_output" >> "$LOG_FILE"
-      log "Codex CLI execution completed"
+      log "Codex CLI execution completed (${codex_exit}, $((codex_end - codex_start))s)"
 
       # Safety net: if Codex modified files but didn't commit, auto-commit
       cd "$REPO_PATH"
@@ -965,12 +1087,29 @@ Automated by Axinova Agent Fleet ($AGENT_ID, Codex CLI)
 Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       fi
 
-      execution_success=true
+      # Only mark success if Codex actually produced commits
+      local codex_commit_count
+      codex_commit_count=$(git log origin/main.."$branch_name" --oneline 2>/dev/null | wc -l | tr -d ' ') || codex_commit_count=0
+      if [[ "$codex_commit_count" -gt 0 ]]; then
+        execution_success=true
+      else
+        log "Codex exited successfully but produced no changes — falling back to $selected_model"
+        add_task_comment "$task_id" "[FALLBACK] Codex produced 0 changes (exit 0 but no commits), trying $selected_model | Agent: $AGENT_ID"
+        model_used="$selected_model"
+      fi
     else
+      codex_exit=$?
+      codex_end=$(date +%s)
+      log_codex_audit "$task_id" "initial" "$codex_exit" "$((codex_end - codex_start))"
       echo "$codex_output" >> "$LOG_FILE"
-      log "Codex CLI failed, falling back to $selected_model"
+      if [[ "$codex_exit" -eq 124 ]]; then
+        log "Codex CLI TIMED OUT after ${CODEX_TIMEOUT}s, falling back to $selected_model"
+        add_task_comment "$task_id" "[TIMEOUT] Codex CLI timed out after ${CODEX_TIMEOUT}s, switching to $selected_model | Agent: $AGENT_ID"
+      else
+        log "Codex CLI failed (exit $codex_exit), falling back to $selected_model"
+        add_task_comment "$task_id" "[FALLBACK] Codex CLI failed (exit $codex_exit), switching to $selected_model | Agent: $AGENT_ID"
+      fi
       model_used="$selected_model"
-      add_task_comment "$task_id" "[FALLBACK] Codex CLI failed, switching to $selected_model | Agent: $AGENT_ID"
     fi
   else
     model_used="$selected_model"
@@ -1028,6 +1167,58 @@ Model: $model_used"
     fi
   fi
 
+  # --- Post-commit validation: task ID and scope checks ---
+  if [[ "$execution_success" == "true" ]]; then
+    cd "$REPO_PATH"
+
+    # Fix 3: Validate commit messages reference the correct task ID
+    local bad_task_refs
+    bad_task_refs=$(git log origin/main.."$branch_name" --oneline 2>/dev/null | grep -oE 'Task #[0-9]+' | grep -v "Task #$task_id" | sort -u) || true
+    if [[ -n "$bad_task_refs" ]]; then
+      log "WARNING: Commits reference wrong task IDs: $bad_task_refs (expected Task #$task_id)"
+      add_task_comment "$task_id" "[WARNING] Some commits reference wrong task IDs: $bad_task_refs — expected Task #$task_id. Please verify commit messages during review. | Agent: $AGENT_ID"
+    fi
+
+    # Fix 4: Validate changed files are in the expected repo directory
+    local changed_files_outside_repo
+    changed_files_outside_repo=$(git diff --name-only origin/main.."$branch_name" 2>/dev/null | grep -v "^" 2>/dev/null) || true
+    # Check if any changed files suggest a different feature scope
+    # Extract key feature words from task title (lowercase)
+    local task_keywords
+    task_keywords=$(echo "$task_title" | tr '[:upper:]' '[:lower:]' | grep -oE '[a-z]{4,}' | tr '\n' '|') || true
+    if [[ -n "$task_keywords" ]]; then
+      # Look for new files (added, not modified) that don't match any task keyword
+      local new_files
+      new_files=$(git diff --name-only --diff-filter=A origin/main.."$branch_name" 2>/dev/null) || true
+      if [[ -n "$new_files" ]]; then
+        # Check for views/components created for features NOT in the task title
+        local suspicious_files=""
+        while IFS= read -r file; do
+          local file_lower
+          file_lower=$(echo "$file" | tr '[:upper:]' '[:lower:]')
+          # Flag new View/Component files that don't match task keywords
+          if echo "$file_lower" | grep -qE '(view|component|page|store)' 2>/dev/null; then
+            local matches_task=false
+            for kw in $(echo "$task_title" | tr '[:upper:]' '[:lower:]' | grep -oE '[a-z]{4,}'); do
+              if echo "$file_lower" | grep -qi "$kw" 2>/dev/null; then
+                matches_task=true
+                break
+              fi
+            done
+            if [[ "$matches_task" == "false" ]]; then
+              suspicious_files="$suspicious_files $file"
+            fi
+          fi
+        done <<< "$new_files"
+
+        if [[ -n "${suspicious_files// /}" ]]; then
+          log "WARNING: New files may be out of scope for task #$task_id: $suspicious_files"
+          add_task_comment "$task_id" "[SCOPE WARNING] New files may not match task scope:${suspicious_files}. Task title: '$task_title'. Please verify during review. | Agent: $AGENT_ID"
+        fi
+      fi
+    fi
+  fi
+
   # --- Local CI: run tests before creating PR ---
   local ci_passed=true
   if [[ "$execution_success" == "true" ]]; then
@@ -1071,11 +1262,16 @@ $ci_error
 Only output a unified diff to fix the errors. No commentary."
 
       local fix_output=""
-      if [[ "$model_used" == "codex-cli" ]] && check_codex_available; then
-        fix_output=$(codex exec --full-auto -C "$REPO_PATH" \
+      if [[ "$model_used" == "codex-cli/"* ]] && check_codex_available; then
+        local cifix_start cifix_end cifix_exit
+        cifix_start=$(date +%s)
+        fix_output=$(_timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$REPO_PATH" \
           "Fix the following test failures. Do NOT introduce new features, only fix the failing tests.
 
 $ci_error" 2>&1) || true
+        cifix_exit=$?
+        cifix_end=$(date +%s)
+        log_codex_audit "$task_id" "ci-fix" "$cifix_exit" "$((cifix_end - cifix_start))"
         # Auto-commit fix if Codex left changes
         if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
           git add -A
@@ -1105,7 +1301,7 @@ $ci_error" 2>&1) || true
         add_task_comment "$task_id" "[CI] Tests passed after auto-fix"
       else
         log "Local CI: STILL FAILING after fix attempt"
-        add_task_comment "$task_id" "[CI-FAILED] Tests still failing after fix attempt"
+        add_task_comment "$task_id" "[CI-FAILED] Tests still failing after fix attempt — will not auto-retry on PR"
       fi
     else
       add_task_comment "$task_id" "[CI] Local tests passed"
@@ -1120,13 +1316,18 @@ $ci_error" 2>&1) || true
   local has_commits
   has_commits=$(git -C "$REPO_PATH" log "origin/main..$branch_name" --oneline 2>/dev/null | wc -l | tr -d ' ')
 
+  # Fix #5: Don't create PRs when local CI failed — escalate directly instead of
+  # creating a broken PR that triggers the PR health check loop
+  if [[ "$has_commits" -gt 0 && "$ci_passed" == "false" ]]; then
+    log "Task #$task_id: $has_commits commit(s) but local CI failed — skipping PR, escalating"
+    add_task_comment "$task_id" "[BLOCKED] Code changes made but local CI failed. Escalating instead of creating a broken PR."
+    escalate_task_to_founder "$task_id" "$task_title" "Agent produced code changes but local CI fails. Branch: \`$branch_name\` in $REPO_NAME. Model: $model_used, Duration: $duration_str."
+    git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
+    return
+  fi
+
   if [[ "$has_commits" -gt 0 ]]; then
     log "Task #$task_id: $has_commits commit(s) made, pushing and creating PR"
-
-    local ci_status_note=""
-    if [[ "$ci_passed" == "false" ]]; then
-      ci_status_note=" ⚠️ Local CI failed — needs manual review"
-    fi
 
     git -C "$REPO_PATH" push -u origin "$branch_name" 2>>"$LOG_FILE"
 
@@ -1144,13 +1345,13 @@ $task_description
 - Model: \`$model_used\`
 - Duration: $duration_str
 - Vikunja Task: #$task_id
-- Local CI: $([ "$ci_passed" = "true" ] && echo "PASSED" || echo "FAILED")
+- Local CI: PASSED
 
 ## Changes
 $(git -C "$REPO_PATH" log origin/main..$branch_name --pretty=format:'- %s' 2>/dev/null)
 
 ---
-Automated by Axinova Agent Fleet${ci_status_note}
+Automated by Axinova Agent Fleet
 PRBODY
 )" \
       --base main \
@@ -1160,25 +1361,32 @@ PRBODY
       log "PR created: $pr_url"
       # Move to In Review (not Done — founder reviews the PR first)
       move_to_bucket "$task_id" "$BUCKET_IN_REVIEW"
-      # Store PR URL in description so it's visible on Kanban board
+      # Append PR result to description using jq to safely handle HTML content
+      # FIX: Do NOT use echo -e (corrupts HTML backslash sequences).
+      # Instead, use jq to read existing description and append the result note.
+      local pr_note="PR: $pr_url | Model: $model_used | CI: PASSED"
+      local existing_task_json
+      existing_task_json=$(vikunja_api GET "/tasks/$task_id" 2>/dev/null) || true
       local existing_desc
-      existing_desc=$(vikunja_api GET "/tasks/$task_id" 2>/dev/null | jq -r '.description // ""' 2>/dev/null || echo "")
-      local pr_note="PR: $pr_url | Model: $model_used | CI: $([ "$ci_passed" = "true" ] && echo "PASSED" || echo "FAILED")"
-      local new_desc="${existing_desc:+$existing_desc\n\n}--- Result ---\n$pr_note"
-      local escaped_desc
-      escaped_desc=$(echo -e "$new_desc" | jq -Rs .)
-      update_vikunja_task "$task_id" "{\"percent_done\": 0.8, \"description\": $escaped_desc}"
-      add_task_comment "$task_id" "[IN REVIEW] PR: $pr_url | Model: $model_used | Duration: $duration_str | Commits: $has_commits | CI: $([ "$ci_passed" = "true" ] && echo "PASSED" || echo "FAILED")"
+      existing_desc=$(echo "$existing_task_json" | jq -r '.description // ""' 2>/dev/null || echo "")
+      # Use jq to safely concatenate description + result note (no echo -e, no double-escaping)
+      local merged_payload
+      merged_payload=$(jq -n \
+        --arg desc "$existing_desc" \
+        --arg note "$pr_note" \
+        '{percent_done: 0.8, description: ($desc + "\n\n--- Result ---\n" + $note)}')
+      vikunja_api POST "/tasks/${task_id}" "$merged_payload" >>"$LOG_FILE" 2>&1 || true
+      add_task_comment "$task_id" "[IN REVIEW] PR: $pr_url | Model: $model_used | Duration: $duration_str | Commits: $has_commits | CI: PASSED"
 
       # Notify Discord #agent-prs with rich embed
       notify_discord_rich "${DISCORD_WEBHOOK_PRS:-}" \
         "PR Created - Task #$task_id" \
         "**$task_title**\n$pr_url" \
-        "$([ "$ci_passed" = "true" ] && echo 65280 || echo 16776960)" \
+        65280 \
         "Model" "$model_used" \
         "Duration" "$duration_str" \
         "Repo" "$REPO_NAME" \
-        "CI" "$([ "$ci_passed" = "true" ] && echo "PASSED" || echo "FAILED")"
+        "CI" "PASSED"
     else
       log "WARNING: Failed to create PR for task #$task_id"
       escalate_task_to_founder "$task_id" "$task_title" "PR creation failed — commits exist on branch \`$branch_name\` but \`gh pr create\` failed. Repo: $REPO_NAME"
@@ -1195,7 +1403,7 @@ PRBODY
 # --- PR Retry Thresholds ---
 MAX_REVIEW_ATTEMPTS=3      # Max times agent will try to address review comments per PR
 MAX_CONFLICT_ATTEMPTS=2    # Max times agent will try to resolve conflicts per PR
-MAX_CI_FIX_ATTEMPTS=2      # Max times agent will try to fix CI failures per PR
+MAX_CI_FIX_ATTEMPTS=1      # Max times agent will try to fix CI failures per PR (reduced: local fix already tried in execute_task)
 
 # Read/increment a counter file, return the new count
 increment_counter() {
@@ -1431,12 +1639,22 @@ $(cat "$INSTRUCTIONS_DIR/${ROLE}.md" 2>/dev/null || true)"
 
   if check_codex_available; then
     log "Fixing CI with Codex CLI..."
-    if codex exec --full-auto -C "$REPO_PATH" "$fix_prompt" >>"$LOG_FILE" 2>&1; then
+    local prci_start prci_end prci_exit
+    prci_start=$(date +%s)
+    if _timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$REPO_PATH" "$fix_prompt" >>"$LOG_FILE" 2>&1; then
+      prci_exit=0
+      prci_end=$(date +%s)
+      log_codex_audit "" "pr-ci-fix" "0" "$((prci_end - prci_start))" "$pr_number"
       if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
         git add -A
         git commit -m "[$ROLE] Fix CI failure on PR #$pr_number" 2>>"$LOG_FILE" || true
       fi
       fix_success=true
+    else
+      prci_exit=$?
+      prci_end=$(date +%s)
+      log_codex_audit "" "pr-ci-fix" "$prci_exit" "$((prci_end - prci_start))" "$pr_number"
+      log "Codex CI fix failed (exit $prci_exit, $((prci_end - prci_start))s)"
     fi
   elif [[ -n "${MOONSHOT_API_KEY:-}" ]]; then
     log "Fixing CI with Kimi K2.5..."
@@ -1463,16 +1681,34 @@ $(cat "$INSTRUCTIONS_DIR/${ROLE}.md" 2>/dev/null || true)"
       npm run build >>"$LOG_FILE" 2>&1 || ci_ok=false
     fi
 
-    git push origin "$pr_branch" 2>>"$LOG_FILE" || true
+    if [[ "$ci_ok" == "true" ]]; then
+      git push origin "$pr_branch" 2>>"$LOG_FILE" || true
 
-    gh pr comment "$pr_number" --body "Pushed CI fix ($(git rev-parse --short HEAD)). Local CI: $([ "$ci_ok" = "true" ] && echo "PASSED" || echo "FAILED")" \
-      >>"$LOG_FILE" 2>&1 || true
+      gh pr comment "$pr_number" --body "Pushed CI fix ($(git rev-parse --short HEAD)). Local CI: PASSED" \
+        >>"$LOG_FILE" 2>&1 || true
 
-    log "PR #$pr_number: CI fix pushed"
-    notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
-      "CI Fix Pushed - PR #$pr_number" \
-      "**$pr_title**\nAttempted CI fix and pushed.\n$pr_url" \
-      5814783  # blue
+      log "PR #$pr_number: CI fix pushed (local CI passed)"
+      notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
+        "CI Fix Pushed - PR #$pr_number" \
+        "**$pr_title**\nCI fix pushed (local CI passed).\n$pr_url" \
+        5814783  # blue
+    else
+      log "PR #$pr_number: local CI still failing after fix — NOT pushing broken code"
+      gh pr comment "$pr_number" --body "CI fix attempted but local CI still FAILS. Not pushing. Escalating to founder." \
+        >>"$LOG_FILE" 2>&1 || true
+
+      # Extract task ID from PR title if possible, escalate
+      local pr_task_id
+      pr_task_id=$(echo "$pr_title" | grep -oE 'Task #[0-9]+' | grep -oE '[0-9]+' | head -1) || true
+      if [[ -n "$pr_task_id" ]]; then
+        escalate_task_to_founder "$pr_task_id" "$pr_title" "CI fix attempted on PR #$pr_number but local CI still fails. Branch: \`$pr_branch\`. NOT pushed to avoid merging broken code."
+      fi
+
+      notify_discord "${DISCORD_WEBHOOK_ALERTS:-}" \
+        "CI Fix FAILED - PR #$pr_number" \
+        "**$pr_title**\nLocal CI still failing after fix attempt. Not pushed.\n$pr_url" \
+        16711680  # red
+    fi
   else
     log "PR #$pr_number: CI fix attempt failed"
   fi
@@ -1612,7 +1848,12 @@ $(cat "$INSTRUCTIONS_DIR/${ROLE}.md" 2>/dev/null || true)
 
   if check_codex_available; then
     log "Addressing review with Codex CLI..."
-    if codex exec --full-auto -C "$REPO_PATH" "$review_prompt" >>"$LOG_FILE" 2>&1; then
+    local rev_start rev_end rev_exit
+    rev_start=$(date +%s)
+    if _timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$REPO_PATH" "$review_prompt" >>"$LOG_FILE" 2>&1; then
+      rev_exit=0
+      rev_end=$(date +%s)
+      log_codex_audit "" "review-fix" "0" "$((rev_end - rev_start))" "$pr_number"
       if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
         git add -A
         git commit -m "[$ROLE] Address review feedback on PR #$pr_number
@@ -1620,6 +1861,11 @@ $(cat "$INSTRUCTIONS_DIR/${ROLE}.md" 2>/dev/null || true)
 Feedback: ${comment_body:0:100}" 2>>"$LOG_FILE" || true
       fi
       review_success=true
+    else
+      rev_exit=$?
+      rev_end=$(date +%s)
+      log_codex_audit "" "review-fix" "$rev_exit" "$((rev_end - rev_start))" "$pr_number"
+      log "Codex review fix failed (exit $rev_exit, $((rev_end - rev_start))s)"
     fi
   elif [[ -n "${MOONSHOT_API_KEY:-}" ]]; then
     log "Addressing review with Kimi K2.5..."
@@ -1713,6 +1959,18 @@ while true; do
       "Task Claimed - #$TASK_ID" \
       "**$TASK_TITLE**\nAgent: \`$AGENT_ID\`" \
       5814783  # blue
+
+
+    # Complexity heuristic: auto-escalate complex tasks to founder
+    local _complexity_score
+    _complexity_score=$(estimate_complexity "$TASK_TITLE" "$TASK_DESC") || _complexity_score=0
+    log "Task #$TASK_ID complexity score: $_complexity_score"
+    if [[ "$_complexity_score" -ge 4 ]]; then
+      log "Task #$TASK_ID: complexity score $_complexity_score >= 4 — escalating to founder"
+      escalate_task_to_founder "$TASK_ID" "$TASK_TITLE" "Auto-escalated: complexity score $_complexity_score (threshold: 4). Task likely needs multi-component work best handled by Claude Code."
+      sleep "$POLL_INTERVAL"
+      continue
+    fi
 
     execute_task "$TASK_ID" "$TASK_TITLE" "$TASK_DESC"
 
