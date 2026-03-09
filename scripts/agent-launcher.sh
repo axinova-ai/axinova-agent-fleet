@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
 
 # Agent Launcher - Generic builder agent that polls Vikunja for tasks
 # Usage: agent-launcher.sh <agent-id> <workspace-path> [poll-interval-seconds]
@@ -212,7 +213,7 @@ call_kimi_api() {
         model: "kimi-k2.5",
         messages: [{role: "user", content: $prompt}],
         max_tokens: $max_tokens,
-        temperature: 0.2
+        temperature: 1
       }')" 2>&1)
 
   if [[ $? -ne 0 || -z "$response" ]]; then
@@ -269,19 +270,29 @@ call_ollama() {
 # --- Model Selection ---
 select_model() {
   local task_title="$1"
+  local task_desc="${2:-}"
 
-  # Simple heuristic: doc/typo/lint/readme/comment tasks → Ollama (local, zero cost)
+  # Priority 1: Explicit MODEL: directive in task description
+  # Supported values: codex, kimi, ollama
+  # Usage in Vikunja task description: <p><strong>MODEL:</strong> codex</p>
+  local model_override=""
+  model_override=$(echo "$task_desc" | sed "s/<[^>]*>//g" | grep -oiE "MODEL:[[:space:]]*(codex|kimi|ollama)" | head -1 | sed "s/MODEL:[[:space:]]*//I" | tr "[:upper:]" "[:lower:]") || true
+  if [[ -n "$model_override" ]]; then
+    log "Model override from task description: $model_override"
+    echo "$model_override"
+    return
+  fi
+
+  # Priority 2: Simple heuristic — doc/typo/lint tasks → Ollama (local, zero cost)
   if echo "$task_title" | grep -qiE 'readme|typo|lint|format|comment|doc|todo|changelog|license'; then
     echo "ollama"
     return
   fi
 
-  # Everything else → Kimi K2.5 (cloud, high quality)
+  # Priority 3: Default → Kimi K2.5 (cloud, high quality)
   echo "kimi"
 }
 
-
-# Estimate task complexity to decide if it should be auto-escalated to founder
 estimate_complexity() {
   local title="$1" desc="$2"
   local score=0
@@ -711,7 +722,20 @@ check_task_clarity() {
   local task_title="$2"
   local task_description="$3"
 
-  # Wiki tasks need WIKI_PAGES: in description — can't auto-enrich this
+  # Re-fetch full task description from individual endpoint
+  # Kanban view API may return truncated or stale descriptions
+  local full_task
+  full_task=$(vikunja_api GET "/tasks/${task_id}" 2>/dev/null) || true
+  if [[ -n "$full_task" ]]; then
+    local fetched_desc
+    fetched_desc=$(echo "$full_task" | jq -r '.description // ""' 2>/dev/null) || true
+    if [[ -n "$fetched_desc" && ${#fetched_desc} -gt ${#task_description} ]]; then
+      task_description="$fetched_desc"
+      log "Task #$task_id: re-fetched description from API (${#task_description} chars)"
+    fi
+  fi
+
+  # Wiki tasks need WIKI_PAGES: in description
   if is_wiki_task "$task_title" "$task_description"; then
     if [[ -z "$task_description" ]] || ! echo "$task_description" | grep -q "WIKI_PAGES:"; then
       log "Task #$task_id: wiki task but no WIKI_PAGES: in description — unclear"
@@ -733,11 +757,20 @@ check_task_clarity() {
     fi
   fi
 
+  # Skip auto-enrichment if description has structured tags (MODEL/TIER/BENCHMARK/SCOPE)
+  # These are well-defined tasks — do NOT overwrite with auto-generated text
+  local plain_check
+  plain_check=$(echo "$task_description" | sed 's/<[^>]*>//g') || true
+  if echo "$plain_check" | grep -qiE 'MODEL:|TIER:|BENCHMARK|SCOPE:'; then
+    log "Task #$task_id: has structured tags (MODEL/TIER/BENCHMARK/SCOPE), skipping enrichment"
+    ENRICHED_TASK_DESC="$task_description"
+    return 0
+  fi
+
   # Auto-enrich if description is empty or too short
   if [[ -z "$task_description" || ${#task_description} -lt 20 ]]; then
     log "Task #$task_id: description too short (${#task_description} chars) — attempting auto-enrichment"
 
-    # Detect repo for context
     local repo_path
     repo_path=$(detect_repo_path "$task_title")
     if [[ -z "$repo_path" ]]; then
@@ -750,8 +783,6 @@ check_task_clarity() {
 
     local enriched_desc
     if enriched_desc=$(auto_enrich_description "$task_id" "$task_title" "$repo_path"); then
-      # Update the variable so the caller has the new description
-      # We use a global to pass back the enriched description
       ENRICHED_TASK_DESC="$enriched_desc"
       return 0
     else
@@ -765,7 +796,6 @@ check_task_clarity() {
   return 0
 }
 
-# Escalate task to "Needs Founder" bucket + Discord alert
 escalate_task_to_founder() {
   local task_id="$1"
   local task_title="$2"
@@ -1014,7 +1044,7 @@ execute_task() {
 
   # Select fallback model (only used if Codex CLI fails)
   local selected_model
-  selected_model=$(select_model "$task_title")
+  selected_model=$(select_model "$task_title" "$task_description")
   log "Fallback model: $selected_model"
 
   local execution_success=false
@@ -1030,7 +1060,8 @@ $task_history
   fi
 
   # --- Try Codex CLI first (has built-in file tools, best for coding) ---
-  if check_codex_available; then
+  # Skip Codex if MODEL: override explicitly requests kimi or ollama
+  if check_codex_available && [[ "$selected_model" == "codex" || -z "$(echo "$task_description" | sed 's/<[^>]*>//g' | grep -oiE 'MODEL:')" ]]; then
     log "Attempting Codex CLI execution (model: $CODEX_MODEL)..."
     model_used="codex-cli/$CODEX_MODEL"
     add_task_comment "$task_id" "[STARTED] Model: codex-cli/$CODEX_MODEL | Repo: $REPO_NAME | Agent: $AGENT_ID"
