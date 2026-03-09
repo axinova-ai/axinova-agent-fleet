@@ -2004,7 +2004,7 @@ while true; do
 
 
     # Complexity heuristic: auto-escalate complex tasks to founder
-    local _complexity_score
+    _complexity_score=0
     _complexity_score=$(estimate_complexity "$TASK_TITLE" "$TASK_DESC") || _complexity_score=0
     log "Task #$TASK_ID complexity score: $_complexity_score"
     if [[ "$_complexity_score" -ge 4 ]]; then
