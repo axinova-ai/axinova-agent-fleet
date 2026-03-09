@@ -50,8 +50,8 @@ brew install \
   1password-cli \
   direnv
 
-# Claude Code CLI
-npm install -g @anthropic-ai/claude-code
+# Claude Code CLI (via Homebrew)
+brew install --cask claude-code
 
 # Codex CLI (for running agent tasks manually if needed)
 npm install -g @openai/codex

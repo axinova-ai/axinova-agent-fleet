@@ -51,11 +51,11 @@ else
   echo "  Codex CLI already installed: $(codex --version)"
 fi
 
-echo "→ Installing Claude Code CLI..."
-if ! command -v claude &>/dev/null; then
-  npm install -g @anthropic-ai/claude-code
+echo "→ Installing/upgrading Claude Code CLI..."
+if brew list --cask claude-code &>/dev/null; then
+  brew upgrade --cask claude-code || echo "  Claude Code already up to date"
 else
-  echo "  Claude Code already installed: $(claude --version)"
+  brew install --cask claude-code
 fi
 
 # Step 4: Create axinova-agent user (if not exists)

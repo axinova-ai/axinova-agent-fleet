@@ -8,6 +8,9 @@ brew "gh"              # GitHub CLI
 brew "jq"              # JSON processing
 brew "yq"              # YAML processing
 
+# AI coding tools
+cask "claude-code"     # Claude Code CLI
+
 # Container tooling
 cask "docker"          # Docker Desktop
 
