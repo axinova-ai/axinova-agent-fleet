@@ -1182,7 +1182,7 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       model_used="ollama"
       # Alert on Discord — local model usage means both cloud models failed
       notify_discord "${DISCORD_WEBHOOK_ALERTS:-}" \
-        "Local model fallback: Ollama used (Codex & Kimi unavailable)" \⚠️ **Local model fallback** — Task #$task_id using Ollama (both Codex CLI and Kimi K2.5 unavailable). Agent: $AGENT_ID"
+        "Local model fallback: Task #$task_id using Ollama. Agent: $AGENT_ID"
       llm_output=$(call_ollama "$diff_prompt") || true
     fi
 
