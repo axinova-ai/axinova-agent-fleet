@@ -58,7 +58,7 @@ log() {
 notify_discord() {
   local webhook_url="$1"
   local title="$2"
-  local description="$3"
+  local description="${3:-}"
   local color="${4:-5814783}"  # Default: blue (0x58ACFF)
   [[ -z "$webhook_url" ]] && return 0
 
@@ -88,7 +88,7 @@ notify_discord() {
 notify_discord_rich() {
   local webhook_url="$1"
   local title="$2"
-  local description="$3"
+  local description="${3:-}"
   local color="${4:-5814783}"
   shift 4
   # Remaining args are field pairs: name1 value1 name2 value2 ...
@@ -1182,7 +1182,7 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       model_used="ollama"
       # Alert on Discord — local model usage means both cloud models failed
       notify_discord "${DISCORD_WEBHOOK_ALERTS:-}" \
-        "⚠️ **Local model fallback** — Task #$task_id using Ollama (both Codex CLI and Kimi K2.5 unavailable). Agent: $AGENT_ID"
+        "Local model fallback: Ollama used (Codex & Kimi unavailable)" \⚠️ **Local model fallback** — Task #$task_id using Ollama (both Codex CLI and Kimi K2.5 unavailable). Agent: $AGENT_ID"
       llm_output=$(call_ollama "$diff_prompt") || true
     fi
 
