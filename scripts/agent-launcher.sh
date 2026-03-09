@@ -620,6 +620,17 @@ auto_enrich_description() {
   local task_title="$2"
   local repo_path="$3"
 
+  # Safety guard: never overwrite structured descriptions (MODEL/TIER/BENCHMARK/SCOPE tags)
+  local current_desc
+  current_desc=$(vikunja_api GET "/tasks/${task_id}" 2>/dev/null | jq -r '.description // ""' 2>/dev/null) || true
+  local plain_guard
+  plain_guard=$(echo "$current_desc" | sed 's/<[^>]*>//g') || true
+  if echo "$plain_guard" | grep -qiE 'MODEL:|TIER:|BENCHMARK|SCOPE:'; then
+    log "Task #$task_id: description has structured tags — skipping auto-enrichment to preserve MODEL/TIER routing"
+    echo "$current_desc"
+    return 0
+  fi
+
   log "Task #$task_id: auto-enriching description from repo context"
   add_task_comment "$task_id" "[ENRICHING] Description is vague — analyzing repo to generate a proper task description"
 
