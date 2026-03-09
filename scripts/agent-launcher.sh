@@ -1055,7 +1055,7 @@ execute_task() {
 
   # Select fallback model (only used if Codex CLI fails)
   local selected_model
-  selected_model=$(select_model "$task_title" "$task_description")
+  selected_model=$(select_model "$task_title" "$task_description" | tail -1)
   log "Fallback model: $selected_model"
 
   local execution_success=false
