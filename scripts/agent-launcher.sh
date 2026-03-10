@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.npm-global/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 
 # Agent Launcher - Generic builder agent that polls Vikunja for tasks
 # Usage: agent-launcher.sh <agent-id> <workspace-path> [poll-interval-seconds]
@@ -342,11 +342,25 @@ _timeout() {
   fi
 }
 
-# Check if Codex CLI is available and working
+# Check if Codex CLI is available (searches common npm-global locations launchd may miss)
 check_codex_available() {
-  command -v codex >/dev/null 2>&1 || return 1
-  # Codex is installed — we try it as primary
-  return 0
+  if command -v codex >/dev/null 2>&1; then
+    return 0
+  fi
+  # Fallback: check common npm-global install paths not always in launchd PATH
+  local candidate
+  for candidate in \
+    "$HOME/.npm-global/bin/codex" \
+    "$HOME/.local/bin/codex" \
+    "/usr/local/bin/codex" \
+    "$(npm bin -g 2>/dev/null)/codex"; do
+    if [[ -x "$candidate" ]]; then
+      # Inject into PATH so subsequent calls find it without the loop
+      export PATH="$(dirname "$candidate"):$PATH"
+      return 0
+    fi
+  done
+  return 1
 }
 
 # --- Codex Audit Logging ---
@@ -405,9 +419,12 @@ $file_tree
 
 ## Output Format
 
-You MUST output ONLY a unified diff that can be applied with \`git apply\`. No commentary, no explanations outside the diff.
+Your ENTIRE response must be a SINGLE code block — nothing before it, nothing after it.
+Start your response with exactly: \`\`\`diff
+End your response with exactly: \`\`\`
 
-Use this exact format:
+The block must contain a unified diff applicable with \`git apply\`:
+
 \`\`\`diff
 --- a/path/to/file
 +++ b/path/to/file
@@ -420,11 +437,11 @@ Use this exact format:
 
 Rules:
 - Include enough context lines (3+) for clean application
-- Use correct relative paths from repo root
-- For new files, use \`--- /dev/null\` and \`+++ b/path/to/new/file\`
-- For deleted files, use \`--- a/path/to/file\` and \`+++ /dev/null\`
-- Output the diff block ONLY — no markdown fences, no commentary before or after
-- If you need to modify multiple files, include all changes in a single diff
+- Use correct relative paths from repo root (no leading /)
+- For new files: \`--- /dev/null\` and \`+++ b/path/to/new/file\`
+- For deleted files: \`--- a/path/to/file\` and \`+++ /dev/null\`
+- If modifying multiple files, include all hunks in one diff block
+- Do NOT output any explanation, reasoning, or commentary — ONLY the \`\`\`diff block
 PROMPT
 }
 
@@ -793,6 +810,39 @@ check_task_clarity() {
       move_to_bucket "$task_id" "$BUCKET_TODO"
       return 1
     fi
+  fi
+
+  return 0
+}
+
+# Lightweight pre-claim validity check — no LLM calls, no enrichment comments.
+# Only rejects tasks that are fundamentally broken (wrong structure).
+# Enrichment happens AFTER claiming to avoid comment spam from multiple agents.
+check_task_validity() {
+  local task_id="$1"
+  local task_title="$2"
+  local task_description="$3"
+
+  # Re-fetch full description (kanban view may truncate)
+  local full_desc
+  full_desc=$(vikunja_api GET "/tasks/${task_id}" 2>/dev/null | jq -r '.description // ""' 2>/dev/null) || true
+  if [[ -n "$full_desc" && ${#full_desc} -gt ${#task_description} ]]; then
+    task_description="$full_desc"
+  fi
+
+  # Wiki tasks must have WIKI_PAGES: field
+  if is_wiki_task "$task_title" "$task_description"; then
+    if ! echo "$task_description" | grep -q "WIKI_PAGES:"; then
+      log "Task #$task_id: wiki task but no WIKI_PAGES: — skipping"
+      return 1
+    fi
+    return 0
+  fi
+
+  # Code tasks must have a repo name (axinova-*) in title or description
+  if ! echo "$task_title $task_description" | grep -qE 'axinova-[a-zA-Z0-9_-]+'; then
+    log "Task #$task_id: no repo name found — skipping"
+    return 1
   fi
 
   return 0
@@ -1180,11 +1230,16 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
     if [[ -n "$llm_output" ]]; then
       echo "$llm_output" >> "$LOG_FILE"
 
-      # Extract and apply diff
+      # Extract and validate diff — must have at least one @@ hunk header
       local diff_content
       diff_content=$(extract_diff "$llm_output")
+      if ! echo "$diff_content" | grep -q '^@@'; then
+        log "ERROR: LLM output contains no valid hunk headers (@@). Raw output (first 500 chars): ${llm_output:0:500}"
+        add_task_comment "$task_id" "[BLOCKED] $model_used produced no valid diff hunks (git apply would fail). Raw output logged. | Agent: $AGENT_ID"
+        llm_output=""
+      fi
 
-      if apply_diff "$diff_content" "$task_id"; then
+      if [[ -n "$llm_output" ]] && apply_diff "$diff_content" "$task_id"; then
         # Commit the applied changes
         cd "$REPO_PATH"
         git add -A
@@ -1967,21 +2022,15 @@ while true; do
 
     log "Found task #$TASK_ID: $TASK_TITLE"
 
-    # Check if task is clear enough before claiming
-    # If description is vague, auto_enrich_description will generate one
-    ENRICHED_TASK_DESC=""
-    if ! check_task_clarity "$TASK_ID" "$TASK_TITLE" "$TASK_DESC"; then
-      log "Task #$TASK_ID skipped — insufficient description and enrichment failed"
+    # Step 1: Fast pre-claim validity check (no LLM calls, no comments).
+    # Enrichment happens AFTER claim to prevent all agents spamming [ENRICHING] simultaneously.
+    if ! check_task_validity "$TASK_ID" "$TASK_TITLE" "$TASK_DESC"; then
+      log "Task #$TASK_ID skipped — failed validity check (no repo name or bad wiki format)"
       sleep "$POLL_INTERVAL"
       continue
     fi
 
-    # Use enriched description if auto-enrichment happened
-    if [[ -n "$ENRICHED_TASK_DESC" ]]; then
-      TASK_DESC="$ENRICHED_TASK_DESC"
-      log "Task #$TASK_ID: using auto-enriched description (${#TASK_DESC} chars)"
-    fi
-
+    # Step 2: Claim with jitter + re-verify (only one agent wins)
     if ! claim_task "$TASK_ID"; then
       log "Task #$TASK_ID claimed by another builder — back to polling"
       sleep "$POLL_INTERVAL"
@@ -1993,6 +2042,28 @@ while true; do
       "**$TASK_TITLE**\nAgent: \`$AGENT_ID\`" \
       5814783  # blue
 
+    # Step 3: Enrich description AFTER claiming (only the winning agent does this)
+    if [[ -z "$TASK_DESC" || ${#TASK_DESC} -lt 20 ]]; then
+      _enrich_repo=$(detect_repo_path "$TASK_TITLE")
+      if [[ -z "$_enrich_repo" ]]; then
+        add_task_comment "$TASK_ID" "[BLOCKED] Task description is empty and no repo found for auto-enrichment. Resetting to unclaimed."
+        update_vikunja_task "$TASK_ID" '{"percent_done": 0}'
+        move_to_bucket "$TASK_ID" "$BUCKET_TODO"
+        sleep "$POLL_INTERVAL"
+        continue
+      fi
+      _enriched=""
+      if _enriched=$(auto_enrich_description "$TASK_ID" "$TASK_TITLE" "$_enrich_repo"); then
+        TASK_DESC="$_enriched"
+        log "Task #$TASK_ID: using auto-enriched description (${#TASK_DESC} chars)"
+      else
+        add_task_comment "$TASK_ID" "[BLOCKED] Auto-enrichment failed — please add a description manually. Resetting to unclaimed."
+        update_vikunja_task "$TASK_ID" '{"percent_done": 0}'
+        move_to_bucket "$TASK_ID" "$BUCKET_TODO"
+        sleep "$POLL_INTERVAL"
+        continue
+      fi
+    fi
 
     # Complexity heuristic: auto-escalate complex tasks to founder
     _complexity_score=0
