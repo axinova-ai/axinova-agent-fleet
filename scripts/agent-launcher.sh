@@ -577,27 +577,18 @@ update_vikunja_task() {
   local task_id="$1"
   local data="$2"
 
-  # Fetch existing task to preserve fields not in the update payload
+  # GET existing task to preserve ALL fields (Vikunja POST /tasks/{id} replaces ALL fields).
+  # Full merge: existing task is the base, patch fields override. This preserves
+  # percent_done, priority, due_date, title, description — not just title+description.
   local existing
   existing=$(vikunja_api GET "/tasks/${task_id}" 2>/dev/null) || true
 
   if [[ -n "$existing" ]]; then
-    # Always preserve description unless explicitly provided in the update
-    if ! echo "$data" | grep -q '"description"'; then
-      local existing_desc
-      existing_desc=$(echo "$existing" | jq -r '.description // ""' 2>/dev/null) || true
-      if [[ -n "$existing_desc" ]]; then
-        # Use --arg (not --argjson) to safely inject the raw string without double-escaping
-        data=$(echo "$data" | jq --arg desc "$existing_desc" '. + {description: $desc}')
-      fi
-    fi
-    # Always preserve title unless explicitly provided
-    if ! echo "$data" | grep -q '"title"'; then
-      local existing_title
-      existing_title=$(echo "$existing" | jq -r '.title // ""' 2>/dev/null) || true
-      if [[ -n "$existing_title" ]]; then
-        data=$(echo "$data" | jq --arg t "$existing_title" '. + {title: $t}')
-      fi
+    local merged
+    # jq '. + $patch' = shallow merge, patch values win on conflict
+    merged=$(echo "$existing" | jq --argjson patch "$data" '. + $patch' 2>/dev/null) || true
+    if [[ -n "$merged" ]]; then
+      data="$merged"
     fi
   fi
 
@@ -1470,7 +1461,7 @@ escalate_to_human() {
   # Try to find the Vikunja task ID from the PR branch name (agent/ROLE/task-ID)
   local pr_branch task_id_from_pr
   pr_branch=$(cd "$REPO_PATH" && gh pr view "$pr_number" --json headRefName --jq '.headRefName' 2>/dev/null || echo "")
-  task_id_from_pr=$(echo "$pr_branch" | grep -oP 'task-\K\d+' 2>/dev/null || echo "")
+  task_id_from_pr=$(echo "$pr_branch" | sed -n 's/.*task-\([0-9][0-9]*\).*/\1/p' | head -1 || echo "")
   if [[ -n "$task_id_from_pr" ]]; then
     move_to_bucket "$task_id_from_pr" "$BUCKET_NEEDS_FOUNDER"
     add_task_comment "$task_id_from_pr" "[NEEDS FOUNDER] PR #$pr_number: $reason"
