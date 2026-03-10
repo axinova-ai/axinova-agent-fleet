@@ -52,6 +52,16 @@ ssh sg-vpn 'ps aux | grep amneziawg-go | grep -v grep'
 ssh sg-vpn 'systemctl status awg-quick@awg0'
 ```
 
+## First Thing to Check: Aliyun Console Firewall
+
+> **Most common cause of VPN outages.** The Aliyun console firewall (separate from UFW) can silently drop the UDP 39999 rule — even without a server reboot. Check this FIRST before restarting services or rotating ports.
+
+1. Go to https://swas.console.aliyun.com → Server → Firewall
+2. Verify UDP 39999 exists. If missing, re-add it (Protocol: UDP, Port: 39999, Source: 0.0.0.0/0, Policy: Allow)
+3. Test: `ssh sg-vpn 'sudo timeout 15 tcpdump -i eth0 udp port 39999 -n -c 5'` — toggle phone VPN, packets should appear
+
+**Incident 2026-03-08:** VPN dropped for all clients. Server was healthy, process running, UFW correct. Root cause: Aliyun console firewall had silently lost the UDP 39999 rule. Re-adding the rule restored VPN immediately — no restart needed.
+
 ## Symptom → Diagnosis → Fix
 
 ### 1. Client says "unable to establish connection" / handshake timeout

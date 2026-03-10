@@ -8,10 +8,11 @@ RustDesk provides remote desktop access that works behind NAT, through VPNs, and
 
 ### Network Map
 
-| Machine | RustDesk ID | VPN IP (AmneziaWG) | LAN IP |
-|---------|-------------|---------------------|--------|
-| M4 Mac mini (Agent1) | *(see RustDesk app)* | `10.66.66.3` | `192.168.3.6` / `m4-mini.local` |
-| M2 Pro Mac mini (Agent2) | *(see RustDesk app)* | `10.66.66.2` | `192.168.3.5` / `m2-mini.local` |
+| Machine | RustDesk ID | VPN IP (AmneziaWG) | LAN IP | SSH Alias |
+|---------|-------------|---------------------|--------|-----------|
+| M4 Mac mini (Agent1) | *(see RustDesk app)* | `10.66.66.3` | `192.168.3.6` / `m4-mini.local` | `agent01` / `agent01-vpn` |
+| M2 Pro Mac mini (Agent2) | *(see RustDesk app)* | `10.66.66.2` | `192.168.3.5` / `m2-mini.local` | `agent02` / `agent02-vpn` |
+| M1 Mac mini (Workstation) | *(see RustDesk app)* | `10.66.66.4` | `192.168.3.12` | `m1-workstation` / `m1-workstation-vpn` |
 
 ### Connecting via RustDesk
 

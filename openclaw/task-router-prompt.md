@@ -214,21 +214,12 @@ Always add a second label if the work clearly spans two categories.
   ```
 
 **`/status`** — Show fleet status:
-- Use the "List tasks (open)" curl command on project 13
-- Group by labels, show task state (unclaimed / in-progress / in-review / blocked)
-- Format:
+- Run the fleet-live.sh script which shows both task queue AND builder activity:
+  ```bash
+  ~/workspace/axinova-agent-fleet/scripts/fleet-live.sh 2>&1
   ```
-  Fleet Status (16 builders: 10xM4, 6xM2Pro):
-  Unclaimed: 3 tasks
-    #42 [backend] Add health check endpoint to axinova-home-go
-    #45 [frontend, urgent] Fix login page crash in axinova-home-web
-    #46 [devops] Update CI pipeline for axinova-ai-lab-go
-  In Progress: 1 task
-    #43 [backend, testing] claimed by builder-3 — Add user profile tests
-  In Review: 2 tasks
-    #40 [frontend] PR: github.com/...
-    #41 [docs] PR: github.com/...
-  ```
+- Post the output as-is (it includes task queue grouped by state and builder activity from logs)
+- This is the preferred way to check status — it shows everything at a glance
 
 **`/queue`** — Show unclaimed tasks only:
 - Fetch open tasks, show only where `percent_done == 0` (unclaimed)
