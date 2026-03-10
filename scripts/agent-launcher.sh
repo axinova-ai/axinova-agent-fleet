@@ -146,7 +146,9 @@ vikunja_api() {
   elif [[ "$method" != "GET" ]]; then
     args+=(-X "$method")
   fi
-  curl "${args[@]}" "${VIKUNJA_URL}/api/v1${endpoint}" 2>/dev/null
+  # Pipe through tr to strip control chars (U+0000-U+001F) except newline/tab/CR
+  # that Vikunja HTML descriptions may contain, which break jq parsing.
+  curl "${args[@]}" "${VIKUNJA_URL}/api/v1${endpoint}" 2>/dev/null | tr -d '\000-\010\013\014\016-\037'
 }
 
 # --- Vikunja Task Comments (audit trail) ---
