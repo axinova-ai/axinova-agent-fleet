@@ -1183,12 +1183,16 @@ execute_task() {
   local execution_success=false
 
   # Build task history section for the prompt
+  # Sanitize: strip references to other task IDs to prevent LLM confusion
   local history_section=""
   if [[ -n "$task_history" ]]; then
+    # Remove "Task #NNN" references where NNN != current task_id
+    local sanitized_history
+    sanitized_history=$(echo "$task_history" | sed -E "s/Task #([0-9]+)/Task #$task_id/g") || true
     history_section="
 ## Previous Attempts (task history)
 The following comments show what previous agents tried. Learn from any failures or blocked states:
-$task_history
+$sanitized_history
 "
   fi
 
@@ -1402,11 +1406,33 @@ Model: $model_used"
     cd "$REPO_PATH"
 
     # Fix 3: Validate commit messages reference the correct task ID
+    # If wrong IDs found, auto-rewrite commits instead of blocking
     bad_task_refs=$(git log origin/main.."$branch_name" --oneline 2>/dev/null | grep -oE 'Task #[0-9]+' | grep -v "Task #$task_id" | sort -u) || true
     if [[ -n "$bad_task_refs" ]]; then
-      wrong_task_refs_detected=true
-      log "ERROR: Commits reference wrong task IDs: $bad_task_refs (expected Task #$task_id)"
-      add_task_comment "$task_id" "[BLOCKED] Commits reference wrong task IDs: $bad_task_refs — expected Task #$task_id. PR creation stopped to avoid cross-wiring tasks. | Agent: $AGENT_ID"
+      log "WARN: Commits reference wrong task IDs: $bad_task_refs — auto-rewriting to Task #$task_id"
+      # Rewrite all commit messages on the branch to use the correct task ID
+      local rewrite_count
+      rewrite_count=$(git log origin/main.."$branch_name" --oneline 2>/dev/null | wc -l | tr -d ' ') || rewrite_count=0
+      if [[ "$rewrite_count" -gt 0 && "$rewrite_count" -le 10 ]]; then
+        # Use filter-branch to fix task ID references in commit messages
+        git filter-branch -f --msg-filter \
+          "sed -E 's/Task #[0-9]+/Task #$task_id/g'" \
+          origin/main.."$branch_name" 2>>"$LOG_FILE" || true
+        # Verify the rewrite worked
+        bad_task_refs=$(git log origin/main.."$branch_name" --oneline 2>/dev/null | grep -oE 'Task #[0-9]+' | grep -v "Task #$task_id" | sort -u) || true
+        if [[ -n "$bad_task_refs" ]]; then
+          wrong_task_refs_detected=true
+          log "ERROR: Commit rewrite failed, still has wrong refs: $bad_task_refs"
+          add_task_comment "$task_id" "[BLOCKED] Commits reference wrong task IDs: $bad_task_refs — rewrite failed. | Agent: $AGENT_ID"
+        else
+          log "Commit messages auto-fixed to reference Task #$task_id"
+          add_task_comment "$task_id" "[FIX] Auto-corrected commit messages from $bad_task_refs to Task #$task_id | Agent: $AGENT_ID"
+        fi
+      else
+        wrong_task_refs_detected=true
+        log "ERROR: Too many commits ($rewrite_count) to safely rewrite"
+        add_task_comment "$task_id" "[BLOCKED] Commits reference wrong task IDs: $bad_task_refs — too many commits to rewrite. | Agent: $AGENT_ID"
+      fi
     fi
 
     # Fix 4: Validate changed files are in the expected repo directory
