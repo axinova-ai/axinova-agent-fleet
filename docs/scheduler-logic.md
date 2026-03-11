@@ -95,12 +95,12 @@ Comments loaded from Vikunja (last 15) are sanitized before injection into LLM p
 
 ## E2E Testing
 
-Run `scripts/test-scheduler-e2e.sh` to verify all scheduling scenarios:
+Run `scripts/tests/scheduler-e2e.sh` to verify all scheduling scenarios:
 
 ```bash
-./scripts/test-scheduler-e2e.sh              # Full test suite (~8 min)
-./scripts/test-scheduler-e2e.sh --timeout 180 # Faster timeout
-./scripts/test-scheduler-e2e.sh --cleanup     # Close leftover test tasks
+./scripts/tests/scheduler-e2e.sh              # Full test suite (~8 min)
+./scripts/tests/scheduler-e2e.sh --timeout 180 # Faster timeout
+./scripts/tests/scheduler-e2e.sh --cleanup     # Close leftover test tasks
 ```
 
 Tests:
