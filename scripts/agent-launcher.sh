@@ -383,6 +383,7 @@ check_kimi_cli_available() {
   local candidate
   for candidate in \
     "$HOME/.local/bin/kimi" \
+    "$HOME/.local/share/uv/tools/kimi-cli/bin/kimi" \
     "/usr/local/bin/kimi"; do
     if [[ -x "$candidate" ]]; then
       export PATH="$(dirname "$candidate"):$PATH"
