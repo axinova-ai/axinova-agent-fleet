@@ -64,14 +64,9 @@ vikunja_api() {
 create_task() {
   local title="$1" description="$2"
   local result
-  result=$(vikunja_api POST "/projects/$PROJECT_ID/tasks" \
-    -d "$(python3 -c "
-import json, sys
-print(json.dumps({
-    'title': sys.argv[1],
-    'description': sys.argv[2]
-}))
-" "$title" "$description")")
+  local json_body
+  json_body=$(python3 -c 'import json,sys; print(json.dumps({"title": sys.argv[1], "description": sys.argv[2]}))' "$title" "$description")
+  result=$(vikunja_api POST "/projects/$PROJECT_ID/tasks" -d "$json_body")
   local task_id
   task_id=$(echo "$result" | jq -r '.id // 0')
   if [[ "$task_id" == "0" || -z "$task_id" ]]; then
