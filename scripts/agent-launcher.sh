@@ -325,6 +325,7 @@ estimate_complexity() {
 # Codex CLI model (configurable via env, default: gpt-5.3-codex)
 CODEX_MODEL="${CODEX_MODEL:-gpt-5.4}"
 CODEX_TIMEOUT="${CODEX_TIMEOUT:-600}"  # 10 min timeout (complex multi-file tasks need more time)
+KIMI_TIMEOUT="${KIMI_TIMEOUT:-600}"    # 10 min timeout for Kimi CLI
 
 # Portable timeout: macOS has no GNU timeout, use perl fallback
 _timeout() {
@@ -360,6 +361,23 @@ check_codex_available() {
     "$(npm bin -g 2>/dev/null)/codex"; do
     if [[ -x "$candidate" ]]; then
       # Inject into PATH so subsequent calls find it without the loop
+      export PATH="$(dirname "$candidate"):$PATH"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Check if Kimi CLI is available
+check_kimi_cli_available() {
+  if command -v kimi >/dev/null 2>&1; then
+    return 0
+  fi
+  local candidate
+  for candidate in \
+    "$HOME/.local/bin/kimi" \
+    "/usr/local/bin/kimi"; do
+    if [[ -x "$candidate" ]]; then
       export PATH="$(dirname "$candidate"):$PATH"
       return 0
     fi
@@ -558,7 +576,7 @@ detect_repo_path() {
 }
 
 log "Starting agent: id=$AGENT_ID workspace=$WORKSPACE poll=${POLL_INTERVAL}s"
-log "Models available: codex=$(check_codex_available && echo "yes($CODEX_MODEL)" || echo 'no') kimi=$([ -n "${MOONSHOT_API_KEY:-}" ] && echo 'yes' || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
+log "Models available: codex=$(check_codex_available && echo "yes($CODEX_MODEL)" || echo 'no') kimi-cli=$(check_kimi_cli_available && echo 'yes' || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
 
 # --- Task Polling ---
 # Uses the Kanban view API to fetch ONLY tasks in the To-Do bucket.
@@ -1238,51 +1256,107 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
     add_task_comment "$task_id" "[STARTED] Model: $selected_model (codex unavailable) | Repo: $REPO_NAME | Agent: $AGENT_ID"
   fi
 
-  # --- Fallback: Kimi K2.5 or Ollama (unified diff protocol) ---
-  if [[ "$execution_success" == "false" ]]; then
+  # --- Fallback: Kimi CLI (same pattern as Codex — direct file editing) ---
+  if [[ "$execution_success" == "false" && "$model_used" == "kimi" ]]; then
+    if check_kimi_cli_available; then
+      log "Attempting Kimi CLI execution (model: kimi-k2.5)..."
+      model_used="kimi-cli/kimi-k2.5"
+      add_task_comment "$task_id" "[STARTED] Model: kimi-cli/kimi-k2.5 | Repo: $REPO_NAME | Agent: $AGENT_ID"
+
+      local kimi_prompt="You are a builder agent working on the $REPO_NAME repository.
+
+## Task #$task_id: $task_title
+
+$task_description
+$history_section
+## Instructions
+$role_instructions
+
+## Workflow
+1. Implement the changes described in the task
+2. Run tests to verify your changes work (make test for Go, npm run build for Vue)
+3. Stage and commit your changes with a descriptive commit message
+4. Do NOT push or create PRs - that will be handled separately
+
+## Important
+- Follow the existing code conventions in this repository
+- Read CLAUDE.md in the repo root for project-specific guidance
+- Keep changes focused on the task - don't refactor unrelated code
+- If tests fail, fix them before committing
+- Your commit message MUST reference Task #$task_id (not any other task number)
+- Use commit message format: '[builder] Task #$task_id: <description>'
+- ONLY create or modify files directly related to the task title
+- Do NOT create views, components, or handlers for features not mentioned in the task
+- If you need a dependency that doesn't exist yet, leave a TODO comment instead of implementing it"
+
+      local kimi_output
+      local kimi_start kimi_end kimi_exit
+      kimi_start=$(date +%s)
+      if kimi_output=$(_timeout "$KIMI_TIMEOUT" kimi \
+        --yolo \
+        --print \
+        -m "kimi-k2.5" \
+        -w "$REPO_PATH" \
+        -p "$kimi_prompt" \
+        2>&1); then
+        kimi_exit=$?
+      else
+        kimi_exit=$?
+      fi
+      kimi_end=$(date +%s)
+      log "Kimi CLI execution completed (exit=$kimi_exit, $((kimi_end - kimi_start))s)"
+      echo "$kimi_output" >> "$LOG_FILE"
+
+      # Auto-commit if Kimi modified files but didn't commit
+      cd "$REPO_PATH"
+      if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+        log "Kimi left uncommitted changes, auto-committing..."
+        git add -A
+        git commit -m "[builder] Task #$task_id: $task_title
+
+Automated by Axinova Agent Fleet ($AGENT_ID, Kimi CLI)
+Model: kimi-cli/kimi-k2.5" 2>>"$LOG_FILE" || true
+      fi
+
+      # Check if Kimi produced commits
+      local kimi_commit_count
+      kimi_commit_count=$(git log origin/main.."$branch_name" --oneline 2>/dev/null | wc -l | tr -d ' ') || kimi_commit_count=0
+      if [[ "$kimi_commit_count" -gt 0 ]]; then
+        execution_success=true
+      else
+        log "Kimi CLI produced no changes — escalating"
+        add_task_comment "$task_id" "[BLOCKED] Kimi CLI produced 0 changes (exit $kimi_exit, $((kimi_end - kimi_start))s). | Agent: $AGENT_ID"
+      fi
+    else
+      log "Kimi CLI not available — escalating"
+      add_task_comment "$task_id" "[BLOCKED] Kimi CLI not installed. | Agent: $AGENT_ID"
+    fi
+  fi
+
+  # --- Ollama only runs if explicitly requested via MODEL: ollama ---
+  if [[ "$execution_success" == "false" && "$model_used" == "ollama" ]]; then
     local diff_prompt
     diff_prompt=$(build_diff_prompt "$task_title" "$task_description" "$role_instructions" "$REPO_NAME" "$task_history")
-
+    log "Calling Ollama (explicit MODEL: ollama override)..."
     local llm_output=""
-
-    if [[ "$model_used" == "kimi" ]]; then
-      log "Calling Kimi K2.5 API..."
-      llm_output=$(call_kimi_api "$diff_prompt") || true
-    fi
-
-    # If Kimi failed, escalate — Ollama diff quality too low for production use
-    if [[ -z "$llm_output" && "$model_used" == "kimi" ]]; then
-      log "Kimi API failed — escalating (Ollama fallback disabled: diff quality insufficient)"
-      add_task_comment "$task_id" "[BLOCKED] Kimi K2.5 API call failed. Ollama fallback disabled. | Agent: $AGENT_ID"
-    fi
-
-    # Ollama only runs if explicitly requested via MODEL: ollama
-    if [[ "$model_used" == "ollama" ]]; then
-      log "Calling Ollama (explicit MODEL: ollama override)..."
-      llm_output=$(call_ollama "$diff_prompt") || true
-    fi
+    llm_output=$(call_ollama "$diff_prompt") || true
 
     if [[ -n "$llm_output" ]]; then
       log "LLM output length: ${#llm_output} chars (model: $model_used)"
       printf '%s\n' "$llm_output" >> "$LOG_FILE"
 
-      # Extract and validate diff — must have file headers and hunk headers
       local diff_content
       diff_content=$(extract_diff "$llm_output")
 
-      # Validate: needs both file headers (--- / +++) and hunk headers (@@)
       if ! printf '%s' "$diff_content" | grep -q '^@@'; then
-        log "ERROR: No valid hunk headers (@@) in extracted diff. Raw output (first 500 chars): ${llm_output:0:500}"
-        add_task_comment "$task_id" "[BLOCKED] $model_used produced no valid diff hunks. Output length: ${#llm_output} chars. | Agent: $AGENT_ID"
+        log "ERROR: No valid hunk headers (@@) in extracted diff."
         llm_output=""
       elif ! printf '%s' "$diff_content" | grep -q '^--- '; then
-        log "ERROR: No file headers (--- a/...) in extracted diff. Raw output (first 500 chars): ${llm_output:0:500}"
-        add_task_comment "$task_id" "[BLOCKED] $model_used produced diff without file headers. | Agent: $AGENT_ID"
+        log "ERROR: No file headers (--- a/...) in extracted diff."
         llm_output=""
       fi
 
       if [[ -n "$llm_output" ]] && apply_diff "$diff_content" "$task_id"; then
-        # Commit the applied changes
         cd "$REPO_PATH"
         git add -A
         local commit_msg="[builder] Task #$task_id: $task_title
@@ -1292,8 +1366,7 @@ Model: $model_used"
         git commit -m "$commit_msg" 2>>"$LOG_FILE" && execution_success=true
       fi
     else
-      log "ERROR: All LLM backends failed for task #$task_id"
-      add_task_comment "$task_id" "[BLOCKED] All LLM backends failed (codex, kimi, ollama)"
+      log "ERROR: Ollama failed for task #$task_id"
     fi
   fi
 
