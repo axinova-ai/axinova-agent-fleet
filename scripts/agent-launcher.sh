@@ -323,7 +323,7 @@ estimate_complexity() {
   echo "$score"
 }
 # Codex CLI model (configurable via env, default: gpt-5.3-codex)
-CODEX_MODEL="${CODEX_MODEL:-gpt-5.3-codex}"
+CODEX_MODEL="${CODEX_MODEL:-gpt-5.4}"
 CODEX_TIMEOUT="${CODEX_TIMEOUT:-600}"  # 10 min timeout (complex multi-file tasks need more time)
 
 # Portable timeout: macOS has no GNU timeout, use perl fallback
