@@ -66,7 +66,7 @@ create_task() {
   local result
   local json_body
   json_body=$(python3 -c 'import json,sys; print(json.dumps({"title": sys.argv[1], "description": sys.argv[2]}))' "$title" "$description")
-  result=$(vikunja_api POST "/projects/$PROJECT_ID/tasks" -d "$json_body")
+  result=$(vikunja_api PUT "/projects/$PROJECT_ID/tasks" -d "$json_body")
   local task_id
   task_id=$(echo "$result" | jq -r '.id // 0')
   if [[ "$task_id" == "0" || -z "$task_id" ]]; then
