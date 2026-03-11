@@ -1109,9 +1109,15 @@ execute_task() {
   REPO_NAME=$(basename "$REPO_PATH")
   log "Detected repo: $REPO_NAME"
 
-  # Create and switch to branch
+  # Clean working tree and create fresh branch from origin/main
   cd "$REPO_PATH"
+  git checkout main 2>>"$LOG_FILE" || true
+  git reset --hard HEAD 2>>"$LOG_FILE" || true
+  git clean -fd 2>>"$LOG_FILE" || true
   git fetch origin main 2>>"$LOG_FILE" || true
+  git reset --hard origin/main 2>>"$LOG_FILE" || true
+  # Delete old branch if it exists, then create fresh
+  git branch -D "$branch_name" 2>/dev/null || true
   git checkout -b "$branch_name" origin/main 2>>"$LOG_FILE" || {
     git checkout "$branch_name" 2>>"$LOG_FILE" || true
   }
