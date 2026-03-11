@@ -1298,15 +1298,18 @@ Model: $model_used"
   fi
 
   # --- Post-commit validation: task ID and scope checks ---
+  local wrong_task_refs_detected=false
+  local bad_task_refs=""
+
   if [[ "$execution_success" == "true" ]]; then
     cd "$REPO_PATH"
 
     # Fix 3: Validate commit messages reference the correct task ID
-    local bad_task_refs
     bad_task_refs=$(git log origin/main.."$branch_name" --oneline 2>/dev/null | grep -oE 'Task #[0-9]+' | grep -v "Task #$task_id" | sort -u) || true
     if [[ -n "$bad_task_refs" ]]; then
-      log "WARNING: Commits reference wrong task IDs: $bad_task_refs (expected Task #$task_id)"
-      add_task_comment "$task_id" "[WARNING] Some commits reference wrong task IDs: $bad_task_refs — expected Task #$task_id. Please verify commit messages during review. | Agent: $AGENT_ID"
+      wrong_task_refs_detected=true
+      log "ERROR: Commits reference wrong task IDs: $bad_task_refs (expected Task #$task_id)"
+      add_task_comment "$task_id" "[BLOCKED] Commits reference wrong task IDs: $bad_task_refs — expected Task #$task_id. PR creation stopped to avoid cross-wiring tasks. | Agent: $AGENT_ID"
     fi
 
     # Fix 4: Validate changed files are in the expected repo directory
@@ -1452,6 +1455,14 @@ $ci_error" 2>&1) || true
     log "Task #$task_id: $has_commits commit(s) but local CI failed — skipping PR, escalating"
     add_task_comment "$task_id" "[BLOCKED] Code changes made but local CI failed. Escalating instead of creating a broken PR."
     escalate_task_to_founder "$task_id" "$task_title" "Agent produced code changes but local CI fails. Branch: \`$branch_name\` in $REPO_NAME. Model: $model_used, Duration: $duration_str."
+    git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
+    return
+  fi
+
+  if [[ "$has_commits" -gt 0 && "$wrong_task_refs_detected" == "true" ]]; then
+    log "Task #$task_id: commit/task mismatch detected ($bad_task_refs) — skipping PR, escalating"
+    add_task_comment "$task_id" "[NEEDS FOUNDER] Commit/task mismatch detected ($bad_task_refs). Branch: \`$branch_name\`. PR not created."
+    escalate_task_to_founder "$task_id" "$task_title" "Commit messages reference $bad_task_refs instead of Task #$task_id. Branch: \`$branch_name\` in $REPO_NAME. PR creation blocked to prevent cross-task merge."
     git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
     return
   fi
