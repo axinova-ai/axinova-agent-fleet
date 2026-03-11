@@ -135,6 +135,7 @@ declare -a TEST_IDS=()
 # Results stored as simple vars (macOS bash 3 lacks associative arrays)
 RESULT_T1="SKIP" RESULT_T2="SKIP" RESULT_T3="SKIP"
 RESULT_T4="SKIP" RESULT_T5="SKIP" RESULT_T6="SKIP"
+RESULT_T7="SKIP"
 
 run_test_t1_kimi_route() {
   echo -e "\n${CYAN}[T1] MODEL: kimi — Kimi CLI routing${NC}"
@@ -288,6 +289,83 @@ run_test_t6_complexity() {
   fi
 }
 
+run_test_t7_blocked_dependency() {
+  echo -e "\n${CYAN}[T7] Blocked dependency — agents skip tasks with unmet blockers${NC}"
+
+  # Create the blocker task first (will NOT be in To-Do, so agents won't execute it)
+  local blocker_tid
+  blocker_tid=$(create_task \
+    "$TEST_PREFIX [T7-blocker] Dependency blocker — axinova-miniapp-builder-go" \
+    "<p>MODEL: founder</p><p>$TEST_PREFIX Scheduler test T7 blocker task. Must be completed before the blocked task can be picked up.</p>")
+  TEST_IDS+=("$blocker_tid")
+  echo "  Created blocker task #$blocker_tid"
+
+  # Create the blocked task (depends on blocker)
+  local blocked_tid
+  blocked_tid=$(create_task \
+    "$TEST_PREFIX [T7-blocked] Depends on blocker — axinova-miniapp-builder-go" \
+    "<p>$TEST_PREFIX Scheduler test T7 blocked task. Should NOT be picked up until blocker is done.</p><h2>Task</h2><p>Create a file <code>test-t7-blocked.txt</code> in the repo root containing: test-t7-blocked-ok</p>")
+  TEST_IDS+=("$blocked_tid")
+  echo "  Created blocked task #$blocked_tid"
+
+  # Create the dependency relation: blocked_tid is blocked by blocker_tid
+  vikunja_api PUT "/tasks/$blocked_tid/relations" \
+    -d "{\"other_task_id\": $blocker_tid, \"relation_kind\": \"blocked\"}" >/dev/null 2>&1
+  echo "  Created relation: #$blocked_tid blocked by #$blocker_tid"
+
+  # Phase 1: Wait and verify the blocked task is NOT claimed (blocker incomplete)
+  local phase1_wait=$((TIMEOUT / 2))
+  echo "  Phase 1: Waiting ${phase1_wait}s — blocked task should NOT be claimed..."
+  sleep "$phase1_wait"
+
+  local task_json
+  task_json=$(get_task "$blocked_tid") || true
+  local pct
+  pct=$(echo "$task_json" | jq -r '.percent_done // 0') || pct="0"
+  local comments
+  comments=$(get_task_comments "$blocked_tid") || comments="[]"
+  local claim_count
+  claim_count=$(echo "$comments" | jq '[.[] | select(.comment | test("CLAIMED"))] | length' 2>/dev/null) || claim_count=0
+
+  if [[ "$pct" != "0" || "$claim_count" != "0" ]]; then
+    printf "  Phase 1: ${RED}FAIL${NC} — blocked task was claimed before blocker done! (pct=%s, claims=%s)\n" "$pct" "$claim_count"
+    RESULT_T7="FAIL"
+    return
+  fi
+  printf "  Phase 1: ${GREEN}OK${NC} — blocked task not claimed (as expected)\n"
+
+  # Phase 2: Mark blocker as done, then verify blocked task gets picked up
+  echo "  Phase 2: Marking blocker #$blocker_tid as done..."
+  local blocker_full
+  blocker_full=$(get_task "$blocker_tid") || true
+  if [[ -n "$blocker_full" ]]; then
+    local updated
+    updated=$(echo "$blocker_full" | python3 -c "
+import json, sys
+raw = sys.stdin.read()
+clean = ''.join(c if c in '\n\t' or ord(c) >= 32 else '' for c in raw)
+task = json.loads(clean)
+task['done'] = True
+print(json.dumps(task))
+" 2>/dev/null) || updated='{"done": true}'
+    vikunja_api POST "/tasks/$blocker_tid" -d "$updated" >/dev/null 2>&1
+  fi
+
+  check_t7_claimed() {
+    local comments
+    comments=$(get_task_comments "$blocked_tid") || return 1
+    echo "$comments" | grep -q "CLAIMED"
+  }
+
+  if wait_for_condition "blocked task picked up after blocker done" check_t7_claimed "$TIMEOUT"; then
+    RESULT_T7="PASS"
+  else
+    # Blocked task not picked up even after blocker done — might be timeout
+    printf "  Phase 2: ${RED}FAIL${NC} — blocked task not picked up after blocker resolved\n"
+    RESULT_T7="FAIL"
+  fi
+}
+
 # --- Cleanup ---
 
 cleanup_test_tasks() {
@@ -317,10 +395,9 @@ print_results() {
   echo -e "${CYAN}  Agent Scheduler E2E Test Results${NC}"
   echo -e "${CYAN}═══════════════════════════════════════════${NC}"
 
-  local pass=0 fail=0 total=6
-  local labels="T1:MODEL: kimi → Kimi CLI routing T2:MODEL: codex → Codex CLI routing T3:MODEL: founder → agents skip T4:No MODEL → default model selection T5:Race → only 1 agent claims T6:Complexity → auto-escalation"
+  local pass=0 fail=0 total=7
 
-  for test_name in T1 T2 T3 T4 T5 T6; do
+  for test_name in T1 T2 T3 T4 T5 T6 T7; do
     local result
     eval "result=\$RESULT_$test_name"
     local color="$YELLOW"
@@ -334,6 +411,7 @@ print_results() {
       T4) desc="No MODEL -> default model selection";;
       T5) desc="Race -> only 1 agent claims";;
       T6) desc="Complexity -> auto-escalation";;
+      T7) desc="Blocked dependency -> agents skip until resolved";;
     esac
     printf "  %-5s %-45s ${color}%s${NC}\n" "[$test_name]" "$desc" "$result"
   done
@@ -377,6 +455,9 @@ main() {
   run_test_t1_kimi_route
   run_test_t2_codex_route
   run_test_t4_default_model
+
+  # T7 dependency test (has its own internal phases — blocked then unblocked)
+  run_test_t7_blocked_dependency
 
   # T3 runs last because it's a negative test (wait for nothing to happen)
   run_test_t3_founder_guard

@@ -911,6 +911,20 @@ check_task_validity() {
     return 1
   fi
 
+  # Check for unmet task dependencies (blocked relations)
+  # Vikunja embeds related_tasks in the full task GET response.
+  # If any task in related_tasks.blocked has done=false, skip this task.
+  local full_task_json
+  full_task_json=$(vikunja_api GET "/tasks/${task_id}" 2>/dev/null) || true
+  if [[ -n "$full_task_json" ]]; then
+    local blocked_undone
+    blocked_undone=$(echo "$full_task_json" | jq '[(.related_tasks.blocked // [])[] | select(.done == false)] | length' 2>/dev/null) || blocked_undone="0"
+    if [[ "$blocked_undone" -gt 0 ]]; then
+      log "Task #$task_id: blocked by $blocked_undone incomplete task(s) — skipping"
+      return 1
+    fi
+  fi
+
   return 0
 }
 
