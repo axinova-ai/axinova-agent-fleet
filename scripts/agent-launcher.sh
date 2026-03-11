@@ -395,10 +395,29 @@ build_diff_prompt() {
   local repo_name="$4"
   local task_history="${5:-}"
 
-  # Gather repo context: file tree (depth 3), recent git log
-  local file_tree recent_log
+  # Gather repo context: file tree (depth 3), recent git log, key file contents
+  local file_tree recent_log key_files_content
   file_tree=$(find "$REPO_PATH" -maxdepth 3 -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' | head -100 2>/dev/null || true)
   recent_log=$(git -C "$REPO_PATH" log --oneline -5 2>/dev/null || true)
+
+  # Include contents of files likely to be modified (Makefile, main.go, relevant source)
+  # This gives the LLM accurate context lines for diffs
+  key_files_content=""
+  local _kf
+  for _kf in Makefile go.mod cmd/service/main.go cmd/seed/main.go scripts/seed-dev.go package.json src/main.ts; do
+    if [[ -f "$REPO_PATH/$_kf" ]]; then
+      local _content
+      _content=$(head -80 "$REPO_PATH/$_kf" 2>/dev/null || true)
+      if [[ -n "$_content" ]]; then
+        key_files_content="${key_files_content}
+### File: $_kf
+\`\`\`
+$_content
+\`\`\`
+"
+      fi
+    fi
+  done
 
   local history_block=""
   if [[ -n "$task_history" ]]; then
@@ -424,8 +443,11 @@ $recent_log
 
 File tree (partial):
 $file_tree
-
+$key_files_content
 ## Output Format
+
+IMPORTANT: For NEW files, use \`--- /dev/null\` and \`+++ b/path/to/new/file\`.
+Only use \`--- a/path\` when MODIFYING an existing file — and match the context lines EXACTLY as shown above.
 
 Your ENTIRE response must be a SINGLE code block — nothing before it, nothing after it.
 Start your response with exactly: \`\`\`diff
