@@ -137,7 +137,9 @@ wait_for_condition() {
 # --- Test Definitions ---
 
 declare -a TEST_IDS=()
-declare -A TEST_RESULTS=()
+# Results stored as simple vars (macOS bash 3 lacks associative arrays)
+RESULT_T1="SKIP" RESULT_T2="SKIP" RESULT_T3="SKIP"
+RESULT_T4="SKIP" RESULT_T5="SKIP" RESULT_T6="SKIP"
 
 run_test_t1_kimi_route() {
   echo -e "\n${CYAN}[T1] MODEL: kimi — Kimi CLI routing${NC}"
@@ -155,9 +157,9 @@ run_test_t1_kimi_route() {
   }
 
   if wait_for_condition "agent uses Kimi CLI" check_t1 "$TIMEOUT"; then
-    TEST_RESULTS[T1]="PASS"
+    RESULT_T1="PASS"
   else
-    TEST_RESULTS[T1]="FAIL"
+    RESULT_T1="FAIL"
   fi
 }
 
@@ -177,9 +179,9 @@ run_test_t2_codex_route() {
   }
 
   if wait_for_condition "agent uses Codex CLI" check_t2 "$TIMEOUT"; then
-    TEST_RESULTS[T2]="PASS"
+    RESULT_T2="PASS"
   else
-    TEST_RESULTS[T2]="FAIL"
+    RESULT_T2="FAIL"
   fi
 }
 
@@ -207,10 +209,10 @@ run_test_t3_founder_guard() {
 
   if [[ "$pct" == "0" && "$claim_count" == "0" ]]; then
     printf "  Result: ${GREEN}PASS${NC} — no agent claimed it (pct=%s, claims=%s)\n" "$pct" "$claim_count"
-    TEST_RESULTS[T3]="PASS"
+    RESULT_T3="PASS"
   else
     printf "  Result: ${RED}FAIL${NC} — task was claimed! (pct=%s, claims=%s)\n" "$pct" "$claim_count"
-    TEST_RESULTS[T3]="FAIL"
+    RESULT_T3="FAIL"
   fi
 }
 
@@ -231,9 +233,9 @@ run_test_t4_default_model() {
   }
 
   if wait_for_condition "agent picks up with default model" check_t4 "$TIMEOUT"; then
-    TEST_RESULTS[T4]="PASS"
+    RESULT_T4="PASS"
   else
-    TEST_RESULTS[T4]="FAIL"
+    RESULT_T4="FAIL"
   fi
 }
 
@@ -254,19 +256,18 @@ run_test_t5_race() {
 
   if wait_for_condition "at least 1 agent claims" check_t5 "$TIMEOUT"; then
     # Now verify only 1 agent claimed
-    local comments
+    local comments claim_count
     comments=$(get_task_comments "$tid") || comments="[]"
-    local claim_count
     claim_count=$(echo "$comments" | jq '[.[] | select(.comment | test("CLAIMED"))] | length' 2>/dev/null) || claim_count=0
     if [[ "$claim_count" -eq 1 ]]; then
       printf "  Result: ${GREEN}PASS${NC} — exactly 1 claim\n"
-      TEST_RESULTS[T5]="PASS"
+      RESULT_T5="PASS"
     else
       printf "  Result: ${RED}FAIL${NC} — %s claims (expected 1)\n" "$claim_count"
-      TEST_RESULTS[T5]="FAIL"
+      RESULT_T5="FAIL"
     fi
   else
-    TEST_RESULTS[T5]="FAIL"
+    RESULT_T5="FAIL"
   fi
 }
 
@@ -286,9 +287,9 @@ run_test_t6_complexity() {
   }
 
   if wait_for_condition "auto-escalated to Needs Founder" check_t6 "$TIMEOUT"; then
-    TEST_RESULTS[T6]="PASS"
+    RESULT_T6="PASS"
   else
-    TEST_RESULTS[T6]="FAIL"
+    RESULT_T6="FAIL"
   fi
 }
 
@@ -297,7 +298,7 @@ run_test_t6_complexity() {
 cleanup_test_tasks() {
   echo -e "\n${YELLOW}Cleaning up test tasks...${NC}"
   # Close tasks created by this run
-  for tid in "${TEST_IDS[@]}"; do
+  for tid in "${TEST_IDS[@]+"${TEST_IDS[@]}"}"; do
     close_task "$tid"
     echo "  Closed #$tid"
   done
@@ -321,28 +322,25 @@ print_results() {
   echo -e "${CYAN}  Agent Scheduler E2E Test Results${NC}"
   echo -e "${CYAN}═══════════════════════════════════════════${NC}"
 
-  local pass=0 fail=0 total=0
+  local pass=0 fail=0 total=6
+  local labels="T1:MODEL: kimi → Kimi CLI routing T2:MODEL: codex → Codex CLI routing T3:MODEL: founder → agents skip T4:No MODEL → default model selection T5:Race → only 1 agent claims T6:Complexity → auto-escalation"
+
   for test_name in T1 T2 T3 T4 T5 T6; do
-    total=$((total + 1))
-    local result="${TEST_RESULTS[$test_name]:-SKIP}"
+    local result
+    eval "result=\$RESULT_$test_name"
     local color="$YELLOW"
-    if [[ "$result" == "PASS" ]]; then
-      color="$GREEN"
-      pass=$((pass + 1))
-    elif [[ "$result" == "FAIL" ]]; then
-      color="$RED"
-      fail=$((fail + 1))
-    fi
-    printf "  %-5s %-45s ${color}%s${NC}\n" "[$test_name]" \
-      "$(case $test_name in
-        T1) echo "MODEL: kimi → Kimi CLI routing";;
-        T2) echo "MODEL: codex → Codex CLI routing";;
-        T3) echo "MODEL: founder → agents skip";;
-        T4) echo "No MODEL → default model selection";;
-        T5) echo "Race → only 1 agent claims";;
-        T6) echo "Complexity → auto-escalation";;
-      esac)" \
-      "$result"
+    if [[ "$result" == "PASS" ]]; then color="$GREEN"; pass=$((pass + 1));
+    elif [[ "$result" == "FAIL" ]]; then color="$RED"; fail=$((fail + 1)); fi
+    local desc=""
+    case $test_name in
+      T1) desc="MODEL: kimi -> Kimi CLI routing";;
+      T2) desc="MODEL: codex -> Codex CLI routing";;
+      T3) desc="MODEL: founder -> agents skip";;
+      T4) desc="No MODEL -> default model selection";;
+      T5) desc="Race -> only 1 agent claims";;
+      T6) desc="Complexity -> auto-escalation";;
+    esac
+    printf "  %-5s %-45s ${color}%s${NC}\n" "[$test_name]" "$desc" "$result"
   done
 
   echo -e "${CYAN}───────────────────────────────────────────${NC}"
