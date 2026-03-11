@@ -291,13 +291,9 @@ select_model() {
     return
   fi
 
-  # Priority 2: Simple heuristic — doc/typo/lint tasks → Ollama (local, zero cost)
-  if echo "$task_title" | grep -qiE 'readme|typo|lint|format|comment|doc|todo|changelog|license'; then
-    echo "ollama"
-    return
-  fi
-
-  # Priority 3: Default → Kimi K2.5 (cloud, high quality)
+  # Priority 2: Default → Kimi K2.5 (cloud, high quality)
+  # Ollama fallback removed — diff quality too low for automated execution.
+  # Ollama only runs if explicitly requested via MODEL: ollama override.
   echo "kimi"
 }
 
@@ -1254,19 +1250,15 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       llm_output=$(call_kimi_api "$diff_prompt") || true
     fi
 
-    # If Kimi failed or model is Ollama, try Ollama
+    # If Kimi failed, escalate — Ollama diff quality too low for production use
     if [[ -z "$llm_output" && "$model_used" == "kimi" ]]; then
-      log "Kimi failed, falling back to Ollama"
-      model_used="ollama"
-      add_task_comment "$task_id" "[FALLBACK] Kimi K2.5 failed, switching to Ollama | Agent: $AGENT_ID"
+      log "Kimi API failed — escalating (Ollama fallback disabled: diff quality insufficient)"
+      add_task_comment "$task_id" "[BLOCKED] Kimi K2.5 API call failed. Ollama fallback disabled. | Agent: $AGENT_ID"
     fi
 
-    if [[ "$model_used" == "ollama" || -z "$llm_output" ]]; then
-      log "Calling Ollama..."
-      model_used="ollama"
-      # Alert on Discord — local model usage means both cloud models failed
-      notify_discord "${DISCORD_WEBHOOK_ALERTS:-}" \
-        "Local model fallback: Task #$task_id using Ollama. Agent: $AGENT_ID"
+    # Ollama only runs if explicitly requested via MODEL: ollama
+    if [[ "$model_used" == "ollama" ]]; then
+      log "Calling Ollama (explicit MODEL: ollama override)..."
       llm_output=$(call_ollama "$diff_prompt") || true
     fi
 
