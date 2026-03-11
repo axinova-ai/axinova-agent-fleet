@@ -203,19 +203,25 @@ call_kimi_api() {
     return 1
   fi
 
+  local system_msg="You are a code generation agent. Output ONLY a unified diff inside a \`\`\`diff code fence. No explanations. Keep reasoning minimal — prioritize generating the diff output."
+
   local response
   response=$(curl -sf --max-time 600 \
     "https://api.moonshot.cn/v1/chat/completions" \
     -H "Authorization: Bearer $MOONSHOT_API_KEY" \
     -H "Content-Type: application/json" \
     -d "$(jq -n \
+      --arg system "$system_msg" \
       --arg prompt "$prompt" \
       --argjson max_tokens "$max_tokens" \
       '{
         model: "kimi-k2.5",
-        messages: [{role: "user", content: $prompt}],
+        messages: [
+          {role: "system", content: $system},
+          {role: "user", content: $prompt}
+        ],
         max_tokens: $max_tokens,
-        temperature: 1
+        temperature: 0.7
       }')" 2>&1)
 
   if [[ $? -ne 0 || -z "$response" ]]; then
@@ -450,21 +456,28 @@ PROMPT
 # Extract diff from LLM output (handles markdown fences)
 extract_diff() {
   local output="$1"
-  # Try to extract from ```diff ... ``` fences first
+  # Try to extract from ```diff ... ``` fences first (tolerant: allow trailing spaces, language hints)
   local extracted
-  extracted=$(echo "$output" | sed -n '/^```diff$/,/^```$/p' | sed '1d;$d')
+  extracted=$(printf '%s\n' "$output" | sed -n '/^```diff/,/^```[[:space:]]*$/p' | sed '1d;$d')
   if [[ -n "$extracted" ]]; then
-    echo "$extracted"
+    printf '%s\n' "$extracted"
     return
   fi
-  # Try ``` ... ``` fences
-  extracted=$(echo "$output" | sed -n '/^```$/,/^```$/p' | sed '1d;$d')
+  # Try ``` ... ``` fences (any language or plain)
+  extracted=$(printf '%s\n' "$output" | sed -n '/^```/,/^```[[:space:]]*$/p' | sed '1d;$d')
   if [[ -n "$extracted" ]]; then
-    echo "$extracted"
+    printf '%s\n' "$extracted"
     return
   fi
-  # Assume raw diff output
-  echo "$output"
+  # Try to extract just the diff lines (--- a/, +++ b/, @@, +, -, space-prefixed context)
+  extracted=$(printf '%s\n' "$output" | sed -n '/^--- /,/^$/p' | head -500)
+  if printf '%s' "$extracted" | grep -q '^@@'; then
+    printf '%s\n' "$extracted"
+    return
+  fi
+  # Log what we got for debugging
+  log "WARNING: extract_diff could not find fenced or raw diff. First 300 chars: ${output:0:300}"
+  printf '%s\n' "$output"
 }
 
 # Apply unified diff to repo
@@ -482,7 +495,7 @@ apply_diff() {
   # Write diff to temp file
   local diff_file
   diff_file=$(mktemp /tmp/agent-diff-XXXXXX.patch)
-  echo "$diff_content" > "$diff_file"
+  printf '%s\n' "$diff_content" > "$diff_file"
 
   # Try to apply
   if git apply --check "$diff_file" 2>>"$LOG_FILE"; then
@@ -1230,14 +1243,21 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
     fi
 
     if [[ -n "$llm_output" ]]; then
-      echo "$llm_output" >> "$LOG_FILE"
+      log "LLM output length: ${#llm_output} chars (model: $model_used)"
+      printf '%s\n' "$llm_output" >> "$LOG_FILE"
 
-      # Extract and validate diff — must have at least one @@ hunk header
+      # Extract and validate diff — must have file headers and hunk headers
       local diff_content
       diff_content=$(extract_diff "$llm_output")
-      if ! echo "$diff_content" | grep -q '^@@'; then
-        log "ERROR: LLM output contains no valid hunk headers (@@). Raw output (first 500 chars): ${llm_output:0:500}"
-        add_task_comment "$task_id" "[BLOCKED] $model_used produced no valid diff hunks (git apply would fail). Raw output logged. | Agent: $AGENT_ID"
+
+      # Validate: needs both file headers (--- / +++) and hunk headers (@@)
+      if ! printf '%s' "$diff_content" | grep -q '^@@'; then
+        log "ERROR: No valid hunk headers (@@) in extracted diff. Raw output (first 500 chars): ${llm_output:0:500}"
+        add_task_comment "$task_id" "[BLOCKED] $model_used produced no valid diff hunks. Output length: ${#llm_output} chars. | Agent: $AGENT_ID"
+        llm_output=""
+      elif ! printf '%s' "$diff_content" | grep -q '^--- '; then
+        log "ERROR: No file headers (--- a/...) in extracted diff. Raw output (first 500 chars): ${llm_output:0:500}"
+        add_task_comment "$task_id" "[BLOCKED] $model_used produced diff without file headers. | Agent: $AGENT_ID"
         llm_output=""
       fi
 
