@@ -281,11 +281,18 @@ select_model() {
   local task_desc="${2:-}"
 
   # Priority 1: Explicit MODEL: directive in task description
-  # Supported values: codex, kimi, ollama
+  # Supported values: codex, kimi, ollama, founder
   # Usage in Vikunja task description: <p><strong>MODEL:</strong> codex</p>
+  # "founder" means human-only — agents must not execute (should be caught earlier
+  # in check_task_validity, but this is a safety net).
   local model_override=""
-  model_override=$(echo "$task_desc" | sed "s/<[^>]*>//g" | grep -oiE "MODEL:[[:space:]]*(codex|kimi|ollama)" | head -1 | sed "s/MODEL:[[:space:]]*//I" | tr "[:upper:]" "[:lower:]") || true
+  model_override=$(echo "$task_desc" | sed "s/<[^>]*>//g" | grep -oiE "MODEL:[[:space:]]*(codex|kimi|ollama|founder)" | head -1 | sed "s/MODEL:[[:space:]]*//I" | tr "[:upper:]" "[:lower:]") || true
   if [[ -n "$model_override" ]]; then
+    if [[ "$model_override" == "founder" ]]; then
+      log "ERROR: MODEL: founder task reached select_model — should have been filtered in check_task_validity. Aborting."
+      echo "founder"
+      return 1
+    fi
     log "Model override from task description: $model_override"
     echo "$model_override"
     return
@@ -881,6 +888,14 @@ check_task_validity() {
     task_description="$full_desc"
   fi
 
+  # Tasks with MODEL: founder are reserved for manual human work — agents must skip
+  local stripped_desc
+  stripped_desc=$(echo "$task_description" | sed 's/<[^>]*>//g') || true
+  if echo "$stripped_desc" | grep -qiE "MODEL:[[:space:]]*founder"; then
+    log "Task #$task_id: MODEL: founder — reserved for manual work, skipping"
+    return 1
+  fi
+
   # Wiki tasks must have WIKI_PAGES: field
   if is_wiki_task "$task_title" "$task_description"; then
     if ! echo "$task_description" | grep -q "WIKI_PAGES:"; then
@@ -1155,6 +1170,15 @@ execute_task() {
   local selected_model
   selected_model=$(select_model "$task_title" "$task_description" | tail -1)
   log "Fallback model: $selected_model"
+
+  # Safety net: if MODEL: founder leaked through, unclaim and abort
+  if [[ "$selected_model" == "founder" ]]; then
+    log "Task #$task_id has MODEL: founder — unclaiming and returning to To-Do"
+    add_task_comment "$task_id" "[BLOCKED] MODEL: founder — reserved for manual work. Returning to To-Do. | Agent: $AGENT_ID"
+    update_vikunja_task "$task_id" '{"percent_done": 0}'
+    move_to_bucket "$task_id" "$BUCKET_TODO"
+    return 0
+  fi
 
   local execution_success=false
 
