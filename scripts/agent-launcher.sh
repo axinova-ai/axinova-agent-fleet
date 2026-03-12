@@ -129,12 +129,15 @@ notify_discord_rich() {
 VIKUNJA_URL="${APP_VIKUNJA__URL:-http://localhost:3456}"
 VIKUNJA_TOKEN="${APP_VIKUNJA__TOKEN:-}"
 
-# Kanban bucket IDs (project 13, kanban view 52)
+# Kanban bucket IDs (project 13, kanban view 52 — used as canonical bucket-purpose identifiers)
 BUCKET_TODO=35
 BUCKET_DOING=36
 BUCKET_IN_REVIEW=39
 BUCKET_NEEDS_FOUNDER=38
 BUCKET_DONE=37
+
+# Active task project context (cached per-task to avoid extra API calls in move_to_bucket)
+ACTIVE_TASK_PROJECT_ID=0
 
 vikunja_api() {
   local method="$1"
@@ -586,36 +589,193 @@ detect_repo_path() {
 log "Starting agent: id=$AGENT_ID workspace=$WORKSPACE poll=${POLL_INTERVAL}s"
 log "Models available: codex=$(check_codex_available && echo "yes($CODEX_MODEL)" || echo 'no') kimi-cli=$(check_kimi_cli_available && echo 'yes' || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
 
+# --- Multi-project support ---
+# Agents poll tasks from project 13 (agent-fleet) and any project whose title ends with -ag.
+# Each project has its own kanban view and bucket IDs, stored as colon-delimited config lines:
+#   project_id:view_id:bucket_todo:bucket_doing:bucket_in_review:bucket_needs_founder:bucket_done
+# Config is persisted in a temp file (no bash 4 associative arrays — macOS compat).
+
+PROJECT_CONFIG_FILE="/tmp/agent-launcher-project-configs-${AGENT_ID:-default}"
+
+# Helper to parse a field from a colon-delimited project config string
+# Fields: 1=project_id, 2=view_id, 3=bucket_todo, 4=bucket_doing,
+#         5=bucket_in_review, 6=bucket_needs_founder, 7=bucket_done
+get_project_field() {
+  local config="$1" field_idx="$2"
+  echo "$config" | cut -d: -f"$field_idx"
+}
+
+# Lookup project config by project_id from the config file
+get_project_config() {
+  local target_pid="$1"
+  if [[ ! -f "$PROJECT_CONFIG_FILE" ]]; then
+    return 1
+  fi
+  local line
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local pid
+    pid=$(get_project_field "$line" 1)
+    if [[ "$pid" == "$target_pid" ]]; then
+      echo "$line"
+      return 0
+    fi
+  done < "$PROJECT_CONFIG_FILE"
+  return 1
+}
+
+# Discover kanban view and bucket IDs for a single project
+discover_project_config() {
+  local project_id="$1"
+
+  # Find the first kanban view for this project
+  local views
+  views=$(vikunja_api GET "/projects/$project_id/views" 2>/dev/null) || return 1
+
+  local kanban_view_id
+  kanban_view_id=$(echo "$views" | jq -r '[.[] | select(.view_kind == "kanban")] | .[0].id // 0' 2>/dev/null) || return 1
+
+  if [[ "$kanban_view_id" == "0" || -z "$kanban_view_id" ]]; then
+    log "Project #$project_id has no kanban view — skipping"
+    return 1
+  fi
+
+  # Get buckets for this kanban view
+  local buckets
+  buckets=$(vikunja_api GET "/projects/$project_id/views/$kanban_view_id/buckets" 2>/dev/null) || return 1
+
+  # Map bucket names to IDs (case-insensitive matching)
+  local b_todo b_doing b_in_review b_needs_founder b_done
+  b_todo=$(echo "$buckets" | jq -r '[.[] | select(.title | test("to.?do"; "i"))] | .[0].id // 0' 2>/dev/null) || b_todo=0
+  b_doing=$(echo "$buckets" | jq -r '[.[] | select(.title | test("doing"; "i"))] | .[0].id // 0' 2>/dev/null) || b_doing=0
+  b_in_review=$(echo "$buckets" | jq -r '[.[] | select(.title | test("review"; "i"))] | .[0].id // 0' 2>/dev/null) || b_in_review=0
+  b_needs_founder=$(echo "$buckets" | jq -r '[.[] | select(.title | test("founder"; "i"))] | .[0].id // 0' 2>/dev/null) || b_needs_founder=0
+  b_done=$(echo "$buckets" | jq -r '[.[] | select(.title | test("done"; "i"))] | .[0].id // 0' 2>/dev/null) || b_done=0
+
+  # Require at least To-Do and Doing buckets
+  if [[ "$b_todo" == "0" || "$b_doing" == "0" ]]; then
+    log "Project #$project_id missing required buckets (To-Do=$b_todo, Doing=$b_doing) — skipping"
+    return 1
+  fi
+
+  echo "${project_id}:${kanban_view_id}:${b_todo}:${b_doing}:${b_in_review}:${b_needs_founder}:${b_done}"
+}
+
+# Discover all eligible projects at startup and write config file
+discover_eligible_projects() {
+  log "Discovering eligible projects..."
+  : > "$PROJECT_CONFIG_FILE"  # truncate
+
+  # Always include project 13 (agent-fleet) with known config
+  echo "13:52:${BUCKET_TODO}:${BUCKET_DOING}:${BUCKET_IN_REVIEW}:${BUCKET_NEEDS_FOUNDER}:${BUCKET_DONE}" >> "$PROJECT_CONFIG_FILE"
+  log "  Project 13 (agent-fleet): hardcoded config"
+
+  # Discover additional -ag projects
+  local projects
+  projects=$(vikunja_api GET "/projects" 2>/dev/null) || { log "Failed to list projects"; return; }
+
+  local ag_line pid ptitle config
+  # Extract id:title pairs for projects whose title ends with -ag
+  while IFS= read -r ag_line; do
+    [[ -z "$ag_line" ]] && continue
+    pid=$(echo "$ag_line" | cut -d'|' -f1)
+    ptitle=$(echo "$ag_line" | cut -d'|' -f2)
+    [[ -z "$pid" ]] && continue
+    [[ "$pid" == "13" ]] && continue  # Already added
+
+    config=$(discover_project_config "$pid") || continue
+    echo "$config" >> "$PROJECT_CONFIG_FILE"
+    log "  Project $pid ($ptitle): auto-discovered config"
+  done <<< "$(echo "$projects" | jq -r '.[] | select(.title | test("-ag$")) | "\(.id)|\(.title)"' 2>/dev/null || true)"
+
+  local total
+  total=$(wc -l < "$PROJECT_CONFIG_FILE" | tr -d ' ')
+  log "Eligible projects: $total total"
+}
+
+# Map a project-13 bucket ID to the equivalent bucket purpose for any project.
+# Returns the correct bucket_id for the target project.
+# If the target project is 13 or not in config, returns the original bucket_id unchanged.
+resolve_bucket_for_project() {
+  local target_project_id="$1"
+  local p13_bucket_id="$2"
+
+  # Fast path: project 13 uses the original IDs
+  if [[ "$target_project_id" == "13" ]]; then
+    echo "$p13_bucket_id"
+    return
+  fi
+
+  local config
+  config=$(get_project_config "$target_project_id") || { echo "$p13_bucket_id"; return; }
+
+  # Determine which bucket purpose this p13 bucket_id maps to
+  local field_idx=""
+  case "$p13_bucket_id" in
+    "$BUCKET_TODO") field_idx=3 ;;
+    "$BUCKET_DOING") field_idx=4 ;;
+    "$BUCKET_IN_REVIEW") field_idx=5 ;;
+    "$BUCKET_NEEDS_FOUNDER") field_idx=6 ;;
+    "$BUCKET_DONE") field_idx=7 ;;
+    *) echo "$p13_bucket_id"; return ;;  # Unknown bucket, pass through
+  esac
+
+  local resolved
+  resolved=$(get_project_field "$config" "$field_idx")
+  if [[ -z "$resolved" || "$resolved" == "0" ]]; then
+    # Target project doesn't have this bucket; fall back to original
+    echo "$p13_bucket_id"
+  else
+    echo "$resolved"
+  fi
+}
+
 # --- Task Polling ---
 # Uses the Kanban view API to fetch ONLY tasks in the To-Do bucket.
 # Any task in To-Do (regardless of percent_done) is eligible for pickup.
 # Tasks in Doing/Done/In Review/Needs Founder are NOT picked up.
-KANBAN_VIEW_ID=52
+
+# Run project discovery at startup
+discover_eligible_projects
 
 poll_for_task() {
-  # The view tasks API returns: [{id: bucket_id, title: "To-Do", tasks: [...]}, ...]
-  # We extract only tasks from the To-Do bucket (id=35)
-  # Only pick tasks with percent_done=0 (unclaimed, not escalated).
-  # Shuffle the list so agents don't all grab the same first task.
-  local view_data
-  view_data=$(vikunja_api GET "/projects/13/views/${KANBAN_VIEW_ID}/tasks?per_page=50" 2>/dev/null) || { echo '{"id": 0}'; return; }
-
-  local candidates
-  candidates=$(echo "$view_data" | jq -c --argjson todo "$BUCKET_TODO" '
-    [.[] | select(.id == $todo) | .tasks[]? | select(.done == false and .percent_done == 0)]
-  ' 2>/dev/null) || { echo '{"id": 0}'; return; }
-
-  local count
-  count=$(echo "$candidates" | jq 'length' 2>/dev/null || echo "0")
-
-  if [[ "$count" -eq 0 || "$count" == "null" ]]; then
+  # Iterate through all eligible projects in random order.
+  # Returns the first eligible task found (as JSON with project_id).
+  if [[ ! -f "$PROJECT_CONFIG_FILE" ]]; then
     echo '{"id": 0}'
     return
   fi
 
-  # Pick a random task to distribute work across available tasks
-  local idx=$(( RANDOM % count ))
-  echo "$candidates" | jq -c ".[$idx]"
+  local shuffled_configs
+  # macOS sort lacks -R; use awk+RANDOM to shuffle (fallback: unshuffled)
+  shuffled_configs=$(awk 'BEGIN{srand()} {print rand()"\t"$0}' "$PROJECT_CONFIG_FILE" | sort -n | cut -f2-) || shuffled_configs=$(cat "$PROJECT_CONFIG_FILE")
+
+  local config pid view_id b_todo
+  while IFS= read -r config; do
+    [[ -z "$config" ]] && continue
+    pid=$(get_project_field "$config" 1)
+    view_id=$(get_project_field "$config" 2)
+    b_todo=$(get_project_field "$config" 3)
+
+    local view_data
+    view_data=$(vikunja_api GET "/projects/$pid/views/$view_id/tasks?per_page=50" 2>/dev/null) || continue
+
+    local candidates
+    candidates=$(echo "$view_data" | jq -c --argjson todo "$b_todo" '
+      [.[] | select(.id == $todo) | .tasks[]? | select(.done == false and .percent_done == 0)]
+    ' 2>/dev/null) || continue
+
+    local count
+    count=$(echo "$candidates" | jq 'length' 2>/dev/null || echo "0")
+
+    if [[ "$count" -gt 0 && "$count" != "null" ]]; then
+      local idx=$(( RANDOM % count ))
+      echo "$candidates" | jq -c ".[$idx]"
+      return
+    fi
+  done <<< "$shuffled_configs"
+
+  echo '{"id": 0}'
 }
 
 claim_task() {
@@ -671,11 +831,36 @@ update_vikunja_task() {
   vikunja_api POST "/tasks/${task_id}" "$data" >>"$LOG_FILE" 2>&1 || true
 }
 
-# Move task to a kanban bucket (uses view-specific bucket endpoint)
+# Move task to a kanban bucket (project-aware: looks up task's project and resolves correct view/bucket)
+# bucket_id is always passed as a project-13 BUCKET_* constant; this function translates
+# it to the correct bucket ID for the task's actual project.
 move_to_bucket() {
   local task_id="$1"
   local bucket_id="$2"
-  vikunja_api POST "/projects/13/views/52/buckets/${bucket_id}/tasks" "{\"task_id\": $task_id}" >>"$LOG_FILE" 2>&1 || true
+
+  # Use cached project ID if available (set in main loop), otherwise fetch
+  local task_project_id="${ACTIVE_TASK_PROJECT_ID:-0}"
+  if [[ "$task_project_id" == "0" ]]; then
+    local task_data
+    task_data=$(vikunja_api GET "/tasks/$task_id" 2>/dev/null) || task_data=""
+    task_project_id=$(echo "$task_data" | jq -r '.project_id // 0' 2>/dev/null) || task_project_id=0
+  fi
+
+  # Look up the project's view and resolve the bucket ID
+  local config view_id resolved_bucket
+  config=$(get_project_config "$task_project_id") || config=""
+
+  if [[ -n "$config" ]]; then
+    view_id=$(get_project_field "$config" 2)
+    resolved_bucket=$(resolve_bucket_for_project "$task_project_id" "$bucket_id")
+    vikunja_api POST "/projects/${task_project_id}/views/${view_id}/buckets/${resolved_bucket}/tasks" \
+      "{\"task_id\": $task_id}" >>"$LOG_FILE" 2>&1 || true
+  else
+    # Fallback to project 13 defaults if project not in config
+    log "WARN: Task #$task_id project $task_project_id not in config, falling back to project 13"
+    vikunja_api POST "/projects/13/views/52/buckets/${bucket_id}/tasks" \
+      "{\"task_id\": $task_id}" >>"$LOG_FILE" 2>&1 || true
+  fi
 }
 
 # Check if task description has enough clarity for execution
@@ -2210,6 +2395,8 @@ while true; do
   if [[ "$TASK_ID" != "0" && "$TASK_ID" != "null" && -n "$TASK_ID" ]]; then
     TASK_TITLE=$(echo "$TASK_JSON" | jq -r '.title // "Untitled"' 2>/dev/null || echo "Untitled")
     TASK_DESC=$(echo "$TASK_JSON" | jq -r '.description // ""' 2>/dev/null || echo "")
+    # Cache the project_id for this task so move_to_bucket can skip the GET
+    ACTIVE_TASK_PROJECT_ID=$(echo "$TASK_JSON" | jq -r '.project_id // 0' 2>/dev/null || echo "0")
 
     log "Found task #$TASK_ID: $TASK_TITLE"
 
