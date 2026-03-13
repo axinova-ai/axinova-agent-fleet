@@ -210,6 +210,46 @@ ssh agent02 'hostname && date'
 
 ---
 
+### 4c. SSH Key Strategy — Passphrase-Free for Non-Interactive Use
+
+The M1 workstation uses **two separate SSH key files**:
+
+| File | Passphrase | Used for |
+|------|-----------|---------|
+| `~/.ssh/id_ed25519` | **Yes** (protected) | Interactive sessions only — macOS Keychain unlocks via Touch ID |
+| `~/.ssh/id_ed25519_tunnel` | **No** | All outbound SSH from automated/non-interactive contexts (Claude Code, launchd) |
+
+**Why this matters:** Claude Code runs SSH commands in non-interactive subprocesses where `/dev/tty` is unavailable. A passphrase-protected key silently fails with `Permission denied (publickey)` — not a "wrong key" error, just a missing TTY for the passphrase prompt.
+
+**SSH config must use `id_ed25519_tunnel` for all host entries:**
+
+```
+Host ax-sas-tools
+  HostName 121.40.188.25
+  User root
+  IdentityFile ~/.ssh/id_ed25519_tunnel   # NOT id_ed25519
+  IdentitiesOnly yes
+
+Host sg-vpn
+  HostName 8.222.187.10
+  User root
+  IdentityFile ~/.ssh/id_ed25519_tunnel   # NOT id_ed25519
+  IdentitiesOnly yes
+
+Host agent01
+  HostName 192.168.3.6
+  User agent01
+  IdentityFile ~/.ssh/id_ed25519_tunnel
+  IdentitiesOnly yes
+  ForwardAgent yes
+```
+
+**Authorized keys:** `id_ed25519_tunnel.pub` (comment: `m1-workstation-tunnel`) must be added to `~/.ssh/authorized_keys` on every target server. As of 2026-03-13 it is present on: ax-sas-tools, sg-vpn, agent01, agent02.
+
+**If you add a new server** and Claude Code can't SSH to it from this machine, check this first — add `id_ed25519_tunnel.pub` to that server's `authorized_keys`.
+
+---
+
 ## Step 5: VPN Setup (AmneziaWG)
 
 The M1 workstation needs VPN to reach fleet machines when not on home LAN.
@@ -474,6 +514,60 @@ launchctl kickstart -k gui/$(id -u)/com.axinova.claude-tunnel
 ssh agent01   # M4 via VPN
 ssh agent02   # M2 via VPN
 ```
+
+---
+
+## Step 10: Claude Code Skills (Vikunja Fleet Management)
+
+Custom slash commands for managing the agent fleet from Claude Code sessions.
+Install by creating `~/.claude/skills/<skill-name>/SKILL.md`.
+
+```bash
+# Skills live here (one directory per skill):
+ls ~/.claude/skills/
+```
+
+### Installed Skills
+
+| Skill | Invoke | Purpose |
+|-------|--------|---------|
+| `ax-pickup-task` | `/ax-pickup-task 247` | Claim a Needs Founder task, prep workspace branch, start work |
+| `ax-complete-task` | `/ax-complete-task 247` | Create PR, update Vikunja to In Review / Done |
+| `ax-reroute-task` | `/ax-reroute-task 247 codex` | Send escalated task back to builders with better instructions |
+| `ax-task-status` | `/ax-task-status` | Fleet overview — all kanban buckets at a glance |
+| `ax-create-agent-project` | `/ax-create-agent-project` | Create new Vikunja project with full 5-bucket kanban + wave labels |
+| `ax-test-mcp-project` | `/ax-test-mcp-project` | Run MCP e2e tests after changing axinova-mcp-server-go |
+| `ax-test-scheduler` | `/ax-test-scheduler` | Run scheduler e2e tests after changing agent-launcher.sh |
+
+### Typical Founder Workflow
+
+```
+# See what needs attention
+/ax-task-status
+
+# Pick up a task escalated by agents
+/ax-pickup-task 247
+... do the work ...
+/ax-complete-task 247
+
+# Send an over-escalated task back to agents with better spec
+/ax-reroute-task 247 codex
+
+# Create a new sprint project for agents
+/ax-create-agent-project
+```
+
+### Re-installing Skills
+
+The skill files are not in git (they live in `~/.claude/`). To replicate this setup
+on a new machine, copy from the m1-workstation:
+
+```bash
+scp -r ax-workstation@10.66.66.4:~/.claude/skills/ ~/.claude/skills/
+```
+
+Or refer to the source `.codex/skills/` in this repo for the Codex CLI equivalents
+(same logic, different format).
 
 ---
 
