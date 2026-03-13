@@ -40,14 +40,20 @@ NC='\033[0m'
 # --- Helpers ---
 
 load_token() {
-  local env_file="$HOME/.config/axinova/mcp.env"
-  if [[ ! -f "$env_file" ]]; then
-    echo "ERROR: $env_file not found" >&2
+  local env_file=""
+  for candidate in "$HOME/.config/axinova/mcp.env" "$HOME/.config/axinova/vikunja.env" "$HOME/.config/axinova/secrets.env"; do
+    if [[ -f "$candidate" ]] && grep -q 'APP_VIKUNJA__TOKEN' "$candidate" 2>/dev/null; then
+      env_file="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$env_file" ]]; then
+    echo "ERROR: No env file with APP_VIKUNJA__TOKEN found in ~/.config/axinova/" >&2
     exit 1
   fi
   VIKUNJA_TOKEN=$(grep 'APP_VIKUNJA__TOKEN' "$env_file" | cut -d= -f2)
   if [[ -z "$VIKUNJA_TOKEN" ]]; then
-    echo "ERROR: APP_VIKUNJA__TOKEN not found in $env_file" >&2
+    echo "ERROR: APP_VIKUNJA__TOKEN empty in $env_file" >&2
     exit 1
   fi
 }
