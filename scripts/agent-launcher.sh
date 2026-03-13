@@ -11,9 +11,12 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.npm-global/bin:$HOME/.l
 # Example: agent-launcher.sh builder-1 ~/workspace 120
 #
 # LLM Strategy (updated 2026-03-13):
-#   1. Codex CLI (gpt-5.4, OpenAI) → primary automated coding agent
-#   2. Ollama qwen2.5-coder (local) → only if MODEL: ollama set
-#   On failure → escalate to Needs Founder → manual Claude Code CLI (Sonnet/Opus 4.6)
+#   Automated (agents):
+#     1. codex exec --full-auto (gpt-5.4) → primary automated coding
+#     2. Ollama qwen2.5-coder (local) → only if MODEL: ollama set
+#   Manual (founder, Needs Founder bucket):
+#     - Codex CLI (interactive) or Claude Code CLI (Sonnet/Opus 4.6)
+#   On failure → escalate to Needs Founder for manual pickup
 #   Kimi K2.5 removed from builder chain — 5x more escalations than Codex
 
 AGENT_ID="${1:?Usage: agent-launcher.sh <agent-id> <workspace-path> [poll-interval]}"
@@ -302,7 +305,7 @@ select_model() {
     return
   fi
 
-  # Priority 2: Default → Codex CLI (primary automated model)
+  # Priority 2: Default → codex exec (primary automated model)
   # Kimi fallback removed — 5x more escalations than Codex, often exits with 0 changes.
   # If Codex fails, escalate directly to Needs Founder for manual Claude Code CLI pickup.
   # Ollama only runs if explicitly requested via MODEL: ollama override.
@@ -342,7 +345,7 @@ estimate_complexity() {
 
   echo "$score"
 }
-# Codex CLI model (configurable via env, default: gpt-5.3-codex)
+# Codex exec model (configurable via env)
 CODEX_MODEL="${CODEX_MODEL:-gpt-5.4}"
 CODEX_TIMEOUT="${CODEX_TIMEOUT:-600}"  # 10 min timeout (complex multi-file tasks need more time)
 KIMI_TIMEOUT="${KIMI_TIMEOUT:-600}"    # 10 min timeout for Kimi CLI
@@ -597,7 +600,7 @@ detect_repo_path() {
 }
 
 log "Starting agent: id=$AGENT_ID workspace=$WORKSPACE poll=${POLL_INTERVAL}s"
-log "Models available: codex-cli=$(check_codex_available && echo "yes($CODEX_MODEL)" || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
+log "Models available: codex-exec=$(check_codex_available && echo "yes($CODEX_MODEL)" || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
 
 # --- Multi-project support ---
 # Agents poll tasks from project 13 (agent-fleet) and any project whose title ends with -ag.
@@ -1233,7 +1236,7 @@ execute_wiki_task() {
   [[ -z "$REPO_PATH" ]] && REPO_PATH="$WORKSPACE/axinova-agent-fleet"
   REPO_NAME=$(basename "$REPO_PATH")
   log "Executing wiki task #$task_id: $task_title (repo: $REPO_NAME)"
-  add_task_comment "$task_id" "[STARTED] Wiki task | Model: codex-cli/$CODEX_MODEL | Agent: $AGENT_ID"
+  add_task_comment "$task_id" "[STARTED] Wiki task | Model: codex-exec/$CODEX_MODEL | Agent: $AGENT_ID"
 
   # Extract WIKI_PAGES: list from description (comma-separated page names)
   # Strip HTML tags first since Vikunja stores descriptions as HTML
@@ -1336,7 +1339,7 @@ Automated by Axinova Agent Fleet (wiki task)" 2>>"$LOG_FILE" || true
         --title "[builder] Task #${task_id}: ${task_title}" \
         --body "Wiki + repo update. Vikunja task #${task_id}. Duration: ${duration_str}." \
         --base main 2>>"$LOG_FILE") || true
-      local result_msg="[COMPLETED] Wiki + repo changes | Model: codex-cli/$CODEX_MODEL | Duration: ${duration_str} | Agent: $AGENT_ID"
+      local result_msg="[COMPLETED] Wiki + repo changes | Model: codex-exec/$CODEX_MODEL | Duration: ${duration_str} | Agent: $AGENT_ID"
       [[ -n "$pr_url" ]] && result_msg+=" | PR: $pr_url"
       move_to_bucket "$task_id" "$BUCKET_IN_REVIEW"
       add_task_comment "$task_id" "$result_msg"
@@ -1348,14 +1351,14 @@ Automated by Axinova Agent Fleet (wiki task)" 2>>"$LOG_FILE" || true
       page_names=$(printf '%s, ' "${page_list[@]}" | sed 's/, $//')
       local wiki_urls
       wiki_urls=$(for p in "${page_list[@]}"; do echo "${SILVERBULLET_URL}/.fs/${p// /%20}.md"; done | tr '\n' ' ')
-      add_task_comment "$task_id" "[COMPLETED] Wiki updated | Model: codex-cli/$CODEX_MODEL | Duration: ${duration_str} | Pages: ${page_names} | Agent: $AGENT_ID | URLs: ${wiki_urls}"
+      add_task_comment "$task_id" "[COMPLETED] Wiki updated | Model: codex-exec/$CODEX_MODEL | Duration: ${duration_str} | Pages: ${page_names} | Agent: $AGENT_ID | URLs: ${wiki_urls}"
     fi
     notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
       "Wiki Task Done - #${task_id}" \
       "**${task_title}**\nPages updated: ${#page_list[@]} | Duration: ${duration_str}" \
       65280  # green
   else
-    escalate_task_to_founder "$task_id" "$task_title" "Wiki task execution failed. Escalating to Needs Founder for manual Claude Code CLI pickup."
+    escalate_task_to_founder "$task_id" "$task_title" "Wiki task execution failed. Escalating to Needs Founder for manual pickup (Codex CLI or Claude Code CLI)."
   fi
 
   git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
@@ -1452,8 +1455,8 @@ $sanitized_history
   # Skip Codex if MODEL: override explicitly requests kimi or ollama
   if check_codex_available && [[ "$selected_model" == "codex" || -z "$(echo "$task_description" | sed 's/<[^>]*>//g' | grep -oiE 'MODEL:')" ]]; then
     log "Attempting Codex CLI execution (model: $CODEX_MODEL)..."
-    model_used="codex-cli/$CODEX_MODEL"
-    add_task_comment "$task_id" "[STARTED] Model: codex-cli/$CODEX_MODEL | Repo: $REPO_NAME | Agent: $AGENT_ID"
+    model_used="codex-exec/$CODEX_MODEL"
+    add_task_comment "$task_id" "[STARTED] Model: codex-exec/$CODEX_MODEL | Repo: $REPO_NAME | Agent: $AGENT_ID"
 
     local codex_prompt="You are a builder agent working on the $REPO_NAME repository.
 
@@ -1503,8 +1506,8 @@ $role_instructions
         git add -A
         git commit -m "[builder] Task #$task_id: $task_title
 
-Automated by Axinova Agent Fleet ($AGENT_ID, Codex CLI)
-Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
+Automated by Axinova Agent Fleet ($AGENT_ID, codex exec)
+Model: codex-exec/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       fi
 
       # Only mark success if Codex actually produced commits
@@ -1514,7 +1517,7 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
         execution_success=true
       else
         log "Codex exited successfully but produced no changes — escalating to Needs Founder"
-        add_task_comment "$task_id" "[BLOCKED] Codex produced 0 changes (exit 0, no commits). Escalating to Needs Founder for manual Claude Code CLI pickup. | Agent: $AGENT_ID"
+        add_task_comment "$task_id" "[BLOCKED] Codex produced 0 changes (exit 0, no commits). Escalating to Needs Founder for manual pickup (Codex CLI or Claude Code CLI). | Agent: $AGENT_ID"
       fi
     else
       codex_exit=$?
@@ -1523,17 +1526,17 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       echo "$codex_output" >> "$LOG_FILE"
       if [[ "$codex_exit" -eq 124 ]]; then
         log "Codex CLI TIMED OUT after ${CODEX_TIMEOUT}s — escalating to Needs Founder"
-        add_task_comment "$task_id" "[TIMEOUT] Codex CLI timed out after ${CODEX_TIMEOUT}s. Escalating to Needs Founder for manual Claude Code CLI pickup. | Agent: $AGENT_ID"
+        add_task_comment "$task_id" "[TIMEOUT] Codex CLI timed out after ${CODEX_TIMEOUT}s. Escalating to Needs Founder for manual pickup (Codex CLI or Claude Code CLI). | Agent: $AGENT_ID"
       else
         log "Codex CLI failed (exit $codex_exit) — escalating to Needs Founder"
-        add_task_comment "$task_id" "[BLOCKED] Codex CLI failed (exit $codex_exit). Escalating to Needs Founder for manual Claude Code CLI pickup. | Agent: $AGENT_ID"
+        add_task_comment "$task_id" "[BLOCKED] Codex CLI failed (exit $codex_exit). Escalating to Needs Founder for manual pickup (Codex CLI or Claude Code CLI). | Agent: $AGENT_ID"
       fi
       model_used="$selected_model"
     fi
   else
     log "Codex CLI not available — escalating to Needs Founder"
     add_task_comment "$task_id" "[BLOCKED] Codex CLI not available on this agent. Escalating to Needs Founder. | Agent: $AGENT_ID"
-    escalate_task_to_founder "$task_id" "$task_title" "Codex CLI not available on agent $AGENT_ID. Needs manual Claude Code CLI execution."
+    escalate_task_to_founder "$task_id" "$task_title" "Codex CLI not available on agent $AGENT_ID. Needs manual pickup (Codex CLI or Claude Code CLI)."
     git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
     return 0
   fi
@@ -2432,7 +2435,7 @@ while true; do
     log "Task #$TASK_ID complexity score: $_complexity_score (priority: $TASK_PRIORITY)"
     if [[ "$_complexity_score" -ge 4 ]]; then
       log "Task #$TASK_ID: complexity score $_complexity_score >= 4 — escalating to founder"
-      escalate_task_to_founder "$TASK_ID" "$TASK_TITLE" "Auto-escalated: complexity score $_complexity_score (priority: $TASK_PRIORITY, threshold: 4). Task needs manual Claude Code CLI work (Sonnet 4.6 or Opus 4.6)."
+      escalate_task_to_founder "$TASK_ID" "$TASK_TITLE" "Auto-escalated: complexity score $_complexity_score (priority: $TASK_PRIORITY, threshold: 4). Task needs manual pickup (Codex CLI or Claude Code CLI)."
       sleep "$POLL_INTERVAL"
       continue
     fi

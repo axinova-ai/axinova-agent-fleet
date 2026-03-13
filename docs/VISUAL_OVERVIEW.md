@@ -46,7 +46,7 @@
 │  ┌─ M4 Mac Mini (agent01, 10.66.66.3) ──────────────────────────────┐  │
 │  │  10x Generic Builders (builder-1 to builder-10)                   │  │
 │  │  Also runs: OpenClaw, Local Console Bot                           │  │
-│  │  LLM: Codex CLI (gpt-5.4) → Needs Founder on failure            │  │
+│  │  LLM: codex exec (gpt-5.4, automated) → Needs Founder on fail   │  │
 │  └───────────────────────────────────────┬──────────────────────────┘  │
 │                                          │ Thunderbolt Bridge           │
 │  ┌─ M2 Pro Mac Mini (focusagent02, 10.66.66.2) ────────────────────┐  │
@@ -84,7 +84,7 @@ Vikunja tasks created simultaneously:
 4 generic builders claim 4 tasks in parallel
     │  Each builder: detect repo from title → cd ~/workspace/<repo>
     │  Read builder.md instructions + repo CLAUDE.md
-    │  Execute via Codex CLI (→ Needs Founder on failure)
+    │  Execute via codex exec --full-auto (→ Needs Founder on failure)
     │  Implement → test → commit
     ▼
 agent-launcher.sh handles:
@@ -156,7 +156,7 @@ The orchestrator decomposes work so each task is atomic and produces exactly one
 | Machine | VPN IP | Role | Services | LLM |
 |---------|--------|------|----------|-----|
 | M1 MacBook Air | 10.66.66.18 | **Founder primary** | Claude Code CLI (local), full dev env, fleet access | Claude Code CLI (Sonnet/Opus 4.6) |
-| M4 Mac Mini | 10.66.66.3 | Orchestrator + Builders | OpenClaw, 10 builders (1-10), Local Console Bot | Codex CLI (gpt-5.4) |
+| M4 Mac Mini | 10.66.66.3 | Orchestrator + Builders | OpenClaw, 10 builders (1-10), Local Console Bot | codex exec (gpt-5.4) |
 | M2 Pro Mac Mini | 10.66.66.2 | Builders + LLM Server | 6 builders (11-16), Ollama (Qwen 2.5 Coder 7B) | Codex CLI + Ollama |
 | M1 Workstation | 10.66.66.4 | Founder mirror | Claude Code CLI for phone access | Claude Code CLI (Sonnet/Opus 4.6) |
 | VPN Server | 8.222.187.10 | Network hub | AmneziaWG, SOCKS5 relay | — |
@@ -169,7 +169,7 @@ The orchestrator decomposes work so each task is atomic and produces exactly one
 | Instructions | `agent-instructions/builder.md` (universal) |
 | LaunchAgent | `com.axinova.agent-builder-{1..10}` |
 | Poll interval | 120s |
-| LLM chain | Codex CLI (gpt-5.4) → Needs Founder → Claude Code CLI (Sonnet/Opus 4.6) |
+| LLM chain | codex exec (gpt-5.4) → Needs Founder → Codex CLI or Claude Code CLI |
 | Repo detection | Scan task title for `axinova-*` pattern |
 | Audit trail | Vikunja task comments: `[CLAIMED] → [STARTED] → [IN REVIEW]` |
 

@@ -35,15 +35,15 @@ poll_for_task() → check_task_validity() → claim_task() → execute_task()
 
 | Directive | Effect |
 |-----------|--------|
-| `MODEL: codex` | Force Codex CLI (gpt-5.4) |
+| `MODEL: codex` | Force codex exec (gpt-5.4) |
 | `MODEL: ollama` | Force Ollama (local) |
 | `MODEL: founder` | Rejected in check_task_validity (safety net in select_model too) |
-| (none) | Default: Codex CLI. On failure → Needs Founder → Claude Code CLI |
+| (none) | Default: codex exec. On failure → Needs Founder → manual Codex CLI or Claude Code CLI |
 
 ## Priority-Based Routing (added 2026-03-13)
 
 Vikunja task priority (set at design time by founder):
-- Priority 1-3 → agent-eligible (Codex CLI)
+- Priority 1-3 → agent-eligible (codex exec)
 - Priority ≥4 → auto-escalate immediately to Needs Founder (no Codex attempt)
 
 ## Complexity Gate
@@ -68,7 +68,7 @@ Tasks with labels matching `*-wave-N` (e.g., `steel-wave-2`) are gated:
 ```
 1. Priority check: if priority ≥ 4 → escalate immediately to Needs Founder
 2. Complexity check: if score ≥ 4 → escalate to Needs Founder
-3. Try Codex CLI (unless MODEL: ollama)
+3. Try codex exec --full-auto (unless MODEL: ollama)
    - Timeout: CODEX_TIMEOUT (300s default)
    - Auto-commit if uncommitted changes left
    - If 0 changes or failure → escalate to Needs Founder

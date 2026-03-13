@@ -20,7 +20,7 @@ Vikunja Kanban (Project 13: Agent Fleet)
     ▼
 Builder Pool (16 agents: 10 on M4 + 6 on M2 Pro, polling every 120s)
     │  Detect repo from task title → cd into it
-    │  Codex CLI (primary) → Needs Founder on failure (no Kimi fallback)
+    │  codex exec (gpt-5.4, automated) → Needs Founder on failure
     │  Implement → Test → Commit → Push → PR
     ▼
 Founder reviews PR → merge
@@ -46,11 +46,13 @@ Alternative entry: Claude Code → MCP vikunja_create_task → Builder
 │  AmneziaWG VPN (10.66.66.2)                          │
 └──────────────────────────────────────────────────────┘
 
-LLM Model Chain (all builders, updated 2026-03-13):
-  1. Codex CLI (ChatGPT auth)  → primary coding, built-in file tools
-  2. Ollama qwen2.5-coder:7b   → local fallback (MODEL: ollama only)
-  ✗ Kimi K2.5 removed — 5x more escalations than Codex
-  On failure: escalate to Needs Founder → manual Claude Code CLI (Sonnet/Opus 4.6)
+LLM Model Chain (updated 2026-03-13):
+  Automated (agents):
+    1. codex exec --full-auto (gpt-5.4) → primary coding
+    2. Ollama qwen2.5-coder:7b           → local (MODEL: ollama only)
+  Manual (founder, Needs Founder bucket):
+    - Codex CLI (interactive) or Claude Code CLI (Sonnet/Opus 4.6)
+  ✗ Kimi K2.5 removed from builder chain
 ```
 
 ## Key Concepts

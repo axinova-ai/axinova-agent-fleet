@@ -94,10 +94,10 @@ agent-launcher.sh builder-N ~/workspace 120
     │
     ├── Detect repo: scan task title for axinova-* → cd ~/workspace/<repo>
     │
-    ├── Execute: Codex CLI (primary, only automated model)
-    │   ├─ Priority ≥4 → auto-escalate to Needs Founder (no Codex attempt)
-    │   ├─ Codex CLI (gpt-5.4) — ChatGPT auth, built-in file tools
-    │   ├─ On failure → Needs Founder → manual Claude Code CLI (Kimi removed 2026-03-13)
+    ├── Execute: codex exec --full-auto (automated, non-interactive)
+    │   ├─ Priority ≥4 → auto-escalate to Needs Founder (no codex attempt)
+    │   ├─ codex exec (gpt-5.4) — ChatGPT auth, built-in file tools
+    │   ├─ On failure → Needs Founder → manual Codex CLI or Claude Code CLI
     │   └── Reads agent-instructions/builder.md + repo CLAUDE.md
     │
     ├── Test: make test (Go) / npm run build (Vue)
