@@ -7,7 +7,7 @@ Step-by-step guide to deploy the agent fleet on two Mac minis.
 - Two Mac minis (M4 16GB + M2 Pro 16GB)
 - GitHub organization admin access (axinova-ai)
 - OpenAI account (for Codex CLI auth)
-- Moonshot API key (for Kimi K2.5 via OpenClaw + agent-launcher)
+- Moonshot API key (for OpenClaw orchestrator — Kimi removed from builder chain 2026-03-13)
 - MCP tokens (Portainer, Grafana, SilverBullet, Vikunja)
 - AmneziaWG configs already generated (in `vpn-distribution/configs/macos/`)
 
@@ -192,7 +192,7 @@ curl -k https://vikunja.axinova-internal.xyz/api/v1/info
 # On both Mac Minis:
 mkdir -p ~/.config/axinova && chmod 700 ~/.config/axinova
 
-# Moonshot API key (for Kimi K2.5)
+# Moonshot API key (for OpenClaw orchestrator only — not used by builders)
 echo 'MOONSHOT_API_KEY=sk-...' > ~/.config/axinova/moonshot.env
 chmod 600 ~/.config/axinova/moonshot.env
 ```
@@ -213,14 +213,9 @@ scp launchd/com.axinova.ollama-tunnel.plist agent01@192.168.3.6:~/Library/Launch
 ssh agent01@192.168.3.6 'launchctl load ~/Library/LaunchAgents/com.axinova.ollama-tunnel.plist'
 ```
 
-### 2.5.4 Test multi-model execution
+### 2.5.4 Test model execution
 
 ```bash
-# On M4, test Kimi K2.5 API
-source ~/.config/axinova/moonshot.env
-curl -sf https://api.moonshot.cn/v1/models \
-  -H "Authorization: Bearer $MOONSHOT_API_KEY" | jq '.data[].id'
-
 # On M4, test Ollama via tunnel
 curl -sf http://localhost:11434/api/tags | jq '.models[].name'
 
@@ -313,7 +308,7 @@ cd ~/workspace/axinova-agent-fleet/openclaw
 
 During onboarding, provide:
 - Discord bot token (from Phase 0.3)
-- Moonshot API key (for Kimi K2.5)
+- Moonshot API key (for OpenClaw LLM)
 - Discord server ID, channel IDs
 
 ### 3.5.3 Start OpenClaw daemon
@@ -353,9 +348,9 @@ For all repos, configure `main` branch:
 
 ## Phase 5: End-to-End Tests
 
-### Test 1: Direct Vikunja → Kimi K2.5
+### Test 1: Direct Vikunja → Codex CLI
 1. Create task in Vikunja project 13 with label `backend-sde`
-2. Verify: agent claims → Vikunja comments (CLAIMED, STARTED) → Kimi K2.5 generates unified diff → `git apply` → PR → COMPLETED comment → Discord notified
+2. Verify: agent claims → Vikunja comments (CLAIMED, STARTED) → Codex CLI executes → PR → COMPLETED comment → Discord notified
 
 ### Test 2: Discord → OpenClaw → Agent
 1. Post in Discord #agent-tasks: "Add a /v1/templates endpoint to miniapp-builder-go"
@@ -387,10 +382,10 @@ For all repos, configure `main` branch:
 4. Restart agent: `launchctl kickstart -k gui/$(id -u)/com.axinova.agent-<role>`
 
 ### LLM model failures
-1. Check Kimi API: `source ~/.config/axinova/moonshot.env && curl -sf https://api.moonshot.cn/v1/models -H "Authorization: Bearer $MOONSHOT_API_KEY" | jq '.data[].id'`
+1. Check Codex CLI: `codex --version` (if ChatGPT auth expired, re-run `codex` for OAuth)
 2. Check Ollama: `curl -sf http://localhost:11434/api/tags | jq '.models[].name'`
-3. Check Codex CLI: `codex --version` (if ChatGPT auth expired, re-run `codex` for OAuth)
-4. Fallback chain: Codex → Kimi → Ollama (check logs for which model was used)
+3. Codex CLI is the only automated builder model. On failure, tasks escalate to Needs Founder for manual Claude Code pickup.
+4. For OpenClaw (orchestrator only): `source ~/.config/axinova/moonshot.env && curl -sf https://api.moonshot.cn/v1/models -H "Authorization: Bearer $MOONSHOT_API_KEY" | jq '.data[].id'`
 
 ### Vikunja comments not appearing
 1. Verify token has write access: `curl -sf -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"comment":"test"}' "http://localhost:3456/api/v1/tasks/<id>/comments"`

@@ -11,9 +11,9 @@ Last Updated: 2026-03-02 (Phase 2 — Multi-model + Audit Trail)
 | Priority | Provider | Method | Use Case |
 |----------|----------|--------|----------|
 | 1 | OpenAI Codex | `codex exec --full-auto` (ChatGPT auth) | Primary coding agent (built-in file tools) |
-| 2 | Kimi K2.5 (Moonshot) | REST API → unified diff | Cloud fallback for coding tasks |
-| 3 | Qwen 2.5 7B (Ollama) | Local inference → unified diff | Simple tasks (docs, lint, format) — zero cost |
-| Routing | Kimi K2.5 (Moonshot) | OpenClaw native | Task routing from Discord → Vikunja |
+| ✗ | ~~Kimi K2.5 (Moonshot)~~ | ~~REST API → unified diff~~ | Removed 2026-03-13 — 5x more escalations than Codex |
+| 2 | Qwen 2.5 7B (Ollama) | Local inference → unified diff | Local fallback (MODEL: ollama only) — zero cost |
+| Routing | Kimi K2.5 (Moonshot) | OpenClaw native | Task routing from Discord → Vikunja (orchestrator only) |
 | Review | Claude (Anthropic) | `claude` CLI (human) | PR review + merge (human-in-the-loop) |
 
 **Machine Architecture:**
@@ -21,8 +21,8 @@ Last Updated: 2026-03-02 (Phase 2 — Multi-model + Audit Trail)
 | Machine | Role | Tools | Network |
 |---------|------|-------|---------|
 | MacBook Air (192.168.3.44) | Human dev | Claude Code (Pro Max) | Wi-Fi + Tailscale |
-| M4 Mac Mini (192.168.3.6, `agent01`) | Agent runner + OpenClaw | Codex CLI, Kimi K2.5, Ollama (via tunnel) | Wi-Fi + Thunderbolt (10.10.10.2) |
-| M2 Pro Mac Mini (192.168.3.5, `focusagent02`) | LLM server + agents | Codex CLI, Kimi K2.5, Ollama (native) | Wi-Fi + Thunderbolt (10.10.10.1) |
+| M4 Mac Mini (192.168.3.6, `agent01`) | Agent runner + OpenClaw | Codex CLI (gpt-5.4), Ollama (via tunnel) | Wi-Fi + Thunderbolt (10.10.10.2) |
+| M2 Pro Mac Mini (192.168.3.5, `focusagent02`) | LLM server + agents | Codex CLI (gpt-5.4), Ollama (native) | Wi-Fi + Thunderbolt (10.10.10.1) |
 
 **Current Status:** Phase 5 in progress. Local Console Bot (Discord → Ollama) implemented and connecting to Discord. Awaiting Message Content Intent enablement for command testing. E2E pipeline verified in Phase 3. OpenClaw gateway running on M4.
 
@@ -110,7 +110,7 @@ Last Updated: 2026-03-02 (Phase 2 — Multi-model + Audit Trail)
 
 - [x] Create `scripts/agent-launcher.sh` (Vikunja poller + Codex CLI executor)
 - [x] Rewrite agent-launcher.sh: direct Vikunja API (no LLM for task mgmt), Codex for coding
-- [x] **Phase 2 rewrite: multi-model execution** (Codex CLI → Kimi K2.5 → Ollama fallback)
+- [x] **Phase 2 rewrite: multi-model execution** (Codex CLI → Ollama fallback; Kimi removed 2026-03-13)
 - [x] **Secret loading from `~/.config/axinova/*.env`** (not plist env vars)
 - [x] **Kimi K2.5 API integration** (Moonshot, OpenAI-compatible)
 - [x] **Ollama local inference integration**
@@ -245,7 +245,7 @@ A thin Node.js Discord bot that lets you interact with M2 Pro's Ollama LLM serve
 
 | File | Change |
 |------|--------|
-| `scripts/agent-launcher.sh` | Multi-model execution (Codex → Kimi → Ollama), unified diff protocol, Vikunja comments, secret loading from env files, per-agent Discord identity, rich embeds |
+| `scripts/agent-launcher.sh` | Multi-model execution (Codex → Needs Founder; Kimi removed), unified diff protocol, Vikunja comments, secret loading from env files, per-agent Discord identity, rich embeds, priority routing, wave-gating |
 | `scripts/fleet-status.sh` | Agent ledger (Vikunja comments), Ollama tunnel check, secrets check, LLM model chain display |
 | `scripts/benchmark-ollama.sh` | **NEW** — Local LLM benchmark (qwen2.5-coder:7b vs gemma3:4b) |
 | `openclaw/openclaw.json` | Multi-agent + multi-provider (Moonshot, OpenRouter, Ollama), worker agents defined |

@@ -10,10 +10,11 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.npm-global/bin:$HOME/.l
 #
 # Example: agent-launcher.sh builder-1 ~/workspace 120
 #
-# LLM Strategy (multi-model with fallback):
-#   1. Codex CLI (OpenAI ChatGPT auth) → primary coding agent (has built-in file tools)
-#   2. Kimi K2.5 (Moonshot API)        → cloud fallback (unified diff output)
-#   3. Ollama qwen2.5-coder:14b (local) → simple tasks + final fallback
+# LLM Strategy (updated 2026-03-13):
+#   1. Codex CLI (gpt-5.4, OpenAI) → primary automated coding agent
+#   2. Ollama qwen2.5-coder (local) → only if MODEL: ollama set
+#   On failure → escalate to Needs Founder → manual Claude Code CLI (Sonnet/Opus 4.6)
+#   Kimi K2.5 removed from builder chain — 5x more escalations than Codex
 
 AGENT_ID="${1:?Usage: agent-launcher.sh <agent-id> <workspace-path> [poll-interval]}"
 WORKSPACE="${2:?Usage: agent-launcher.sh <agent-id> <workspace-path> [poll-interval]}"
@@ -303,7 +304,7 @@ select_model() {
 
   # Priority 2: Default → Codex CLI (primary automated model)
   # Kimi fallback removed — 5x more escalations than Codex, often exits with 0 changes.
-  # If Codex fails, escalate directly to Needs Founder for manual Claude Code pickup.
+  # If Codex fails, escalate directly to Needs Founder for manual Claude Code CLI pickup.
   # Ollama only runs if explicitly requested via MODEL: ollama override.
   echo "codex"
 }
@@ -596,7 +597,7 @@ detect_repo_path() {
 }
 
 log "Starting agent: id=$AGENT_ID workspace=$WORKSPACE poll=${POLL_INTERVAL}s"
-log "Models available: codex=$(check_codex_available && echo "yes($CODEX_MODEL)" || echo 'no') kimi-cli=$(check_kimi_cli_available && echo 'yes' || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
+log "Models available: codex-cli=$(check_codex_available && echo "yes($CODEX_MODEL)" || echo 'no') ollama=$(curl -sf "${OLLAMA_HOST:-http://localhost:11434}/api/tags" >/dev/null 2>&1 && echo 'yes' || echo 'no')"
 
 # --- Multi-project support ---
 # Agents poll tasks from project 13 (agent-fleet) and any project whose title ends with -ag.
@@ -1232,7 +1233,7 @@ execute_wiki_task() {
   [[ -z "$REPO_PATH" ]] && REPO_PATH="$WORKSPACE/axinova-agent-fleet"
   REPO_NAME=$(basename "$REPO_PATH")
   log "Executing wiki task #$task_id: $task_title (repo: $REPO_NAME)"
-  add_task_comment "$task_id" "[STARTED] Wiki task | Model: codex-cli/$CODEX_MODEL (fallback: kimi-k2.5) | Agent: $AGENT_ID"
+  add_task_comment "$task_id" "[STARTED] Wiki task | Model: codex-cli/$CODEX_MODEL | Agent: $AGENT_ID"
 
   # Extract WIKI_PAGES: list from description (comma-separated page names)
   # Strip HTML tags first since Vikunja stores descriptions as HTML
@@ -1299,53 +1300,15 @@ ${pages_context}
       wiki_codex_end=$(date +%s)
       log_codex_audit "$task_id" "wiki" "$wiki_codex_exit" "$((wiki_codex_end - wiki_codex_start))"
       if [[ "$wiki_codex_exit" -eq 124 ]]; then
-        log "Codex wiki task TIMED OUT after ${CODEX_TIMEOUT}s, falling back to Kimi"
+        log "Codex wiki task TIMED OUT after ${CODEX_TIMEOUT}s — escalating to Needs Founder"
       else
-        log "Codex wiki task failed (exit $wiki_codex_exit), falling back to Kimi"
+        log "Codex wiki task failed (exit $wiki_codex_exit) — escalating to Needs Founder"
       fi
     fi
   fi
 
-  # --- Fallback: Kimi K2.5 improves each page individually ---
-  if [[ "$execution_success" == "false" && ${#page_list[@]} -gt 0 && -n "${MOONSHOT_API_KEY:-}" ]]; then
-    log "Using Kimi K2.5 for wiki pages (${#page_list[@]} pages)..."
-    local kimi_success=true
-    for page in "${page_list[@]}"; do
-      local current_content
-      current_content=$(silverbullet_get_page "$page")
-      [[ -z "$current_content" ]] && { log "WARNING: Could not read page: $page"; continue; }
-
-      local improve_prompt="You are a tech-writer. Improve this SilverBullet wiki page.
-
-Follow the SOP:
-- Add/update frontmatter: title, tags (expanded), owner (platform-engineering), reviewed ($(date +%Y-%m-%d)), status (active), type
-- Replace plain text navigation with [[wiki-links]]
-- Convert dense paragraphs to tables
-- Add Related Pages section at bottom
-
-Task context: ${task_title}
-${task_description}
-
-Current content of '${page}':
-${current_content}
-
-Return ONLY the complete improved page markdown. No fences, no commentary."
-
-      local improved
-      improved=$(call_kimi_api "$improve_prompt" 16000) || { kimi_success=false; continue; }
-
-      if [[ -n "$improved" ]]; then
-        if silverbullet_put_page "$page" "$improved"; then
-          log "Updated wiki page: $page"
-          add_task_comment "$task_id" "[WIKI] Updated: $page"
-        else
-          log "ERROR: Failed to write wiki page: $page"
-          kimi_success=false
-        fi
-      fi
-    done
-    [[ "$kimi_success" == "true" ]] && execution_success=true
-  fi
+  # --- Kimi K2.5 wiki fallback removed (2026-03-13) ---
+  # Kimi had 5x more escalations than Codex. If Codex fails, escalate to Needs Founder.
 
   # Handle any git changes (docs/ files created by Codex)
   cd "$REPO_PATH"
@@ -1392,7 +1355,7 @@ Automated by Axinova Agent Fleet (wiki task)" 2>>"$LOG_FILE" || true
       "**${task_title}**\nPages updated: ${#page_list[@]} | Duration: ${duration_str}" \
       65280  # green
   else
-    escalate_task_to_founder "$task_id" "$task_title" "Wiki task execution failed after codex + kimi attempts"
+    escalate_task_to_founder "$task_id" "$task_title" "Wiki task execution failed. Escalating to Needs Founder for manual Claude Code CLI pickup."
   fi
 
   git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
@@ -1551,7 +1514,7 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
         execution_success=true
       else
         log "Codex exited successfully but produced no changes — escalating to Needs Founder"
-        add_task_comment "$task_id" "[BLOCKED] Codex produced 0 changes (exit 0, no commits). Escalating to Needs Founder for manual Claude Code pickup. | Agent: $AGENT_ID"
+        add_task_comment "$task_id" "[BLOCKED] Codex produced 0 changes (exit 0, no commits). Escalating to Needs Founder for manual Claude Code CLI pickup. | Agent: $AGENT_ID"
       fi
     else
       codex_exit=$?
@@ -1560,24 +1523,24 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       echo "$codex_output" >> "$LOG_FILE"
       if [[ "$codex_exit" -eq 124 ]]; then
         log "Codex CLI TIMED OUT after ${CODEX_TIMEOUT}s — escalating to Needs Founder"
-        add_task_comment "$task_id" "[TIMEOUT] Codex CLI timed out after ${CODEX_TIMEOUT}s. Escalating to Needs Founder for manual Claude Code pickup. | Agent: $AGENT_ID"
+        add_task_comment "$task_id" "[TIMEOUT] Codex CLI timed out after ${CODEX_TIMEOUT}s. Escalating to Needs Founder for manual Claude Code CLI pickup. | Agent: $AGENT_ID"
       else
         log "Codex CLI failed (exit $codex_exit) — escalating to Needs Founder"
-        add_task_comment "$task_id" "[BLOCKED] Codex CLI failed (exit $codex_exit). Escalating to Needs Founder for manual Claude Code pickup. | Agent: $AGENT_ID"
+        add_task_comment "$task_id" "[BLOCKED] Codex CLI failed (exit $codex_exit). Escalating to Needs Founder for manual Claude Code CLI pickup. | Agent: $AGENT_ID"
       fi
       model_used="$selected_model"
     fi
   else
     log "Codex CLI not available — escalating to Needs Founder"
     add_task_comment "$task_id" "[BLOCKED] Codex CLI not available on this agent. Escalating to Needs Founder. | Agent: $AGENT_ID"
-    escalate_task_to_founder "$task_id" "$task_title" "Codex CLI not available on agent $AGENT_ID. Needs manual Claude Code execution."
+    escalate_task_to_founder "$task_id" "$task_title" "Codex CLI not available on agent $AGENT_ID. Needs manual Claude Code CLI execution."
     git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
     return 0
   fi
 
   # --- Kimi fallback removed (2026-03-13) ---
   # Kimi CLI had 5x more escalations than Codex and often exited with 0 changes.
-  # If Codex fails, escalate directly to Needs Founder for manual Claude Code pickup.
+  # If Codex fails, escalate directly to Needs Founder for manual Claude Code CLI pickup.
 
   # --- Ollama only runs if explicitly requested via MODEL: ollama ---
   if [[ "$execution_success" == "false" && "$model_used" == "ollama" ]]; then
@@ -2469,7 +2432,7 @@ while true; do
     log "Task #$TASK_ID complexity score: $_complexity_score (priority: $TASK_PRIORITY)"
     if [[ "$_complexity_score" -ge 4 ]]; then
       log "Task #$TASK_ID: complexity score $_complexity_score >= 4 — escalating to founder"
-      escalate_task_to_founder "$TASK_ID" "$TASK_TITLE" "Auto-escalated: complexity score $_complexity_score (priority: $TASK_PRIORITY, threshold: 4). Task needs manual Claude Code work."
+      escalate_task_to_founder "$TASK_ID" "$TASK_TITLE" "Auto-escalated: complexity score $_complexity_score (priority: $TASK_PRIORITY, threshold: 4). Task needs manual Claude Code CLI work (Sonnet 4.6 or Opus 4.6)."
       sleep "$POLL_INTERVAL"
       continue
     fi

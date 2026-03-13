@@ -1,7 +1,7 @@
 ---
 name: reroute-task
 description: Send a Needs Founder task back to builders with better instructions or a forced model. Use when a task was over-escalated.
-argument-hint: "[task-id] [model: codex|kimi|ollama]"
+argument-hint: "[task-id] [model: codex|ollama|founder]"
 ---
 
 # Re-Route Task $ARGUMENTS

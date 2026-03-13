@@ -8,17 +8,19 @@ Generic builder agent pool running on Mac minis for autonomous software developm
 Founder (Wei, MacBook Air + Claude Code)
     │  High-level intent ("ship feature X", "fix bug Y")
     ▼
-Orchestrator (OpenClaw on M4, Kimi K2.5)
+Orchestrator (OpenClaw on M4, Kimi K2.5 for routing)
     │  Decomposes into atomic tasks, labels, sequences
     │  Creates Vikunja tasks with rich descriptions
     ▼
 Vikunja Kanban (Project 13: Agent Fleet)
     │  Tasks labeled by category: backend, frontend, devops, etc.
     │  Builders claim any unclaimed task (generic pool)
+    │  Priority routing: 1-3 = agent, ≥4 = Needs Founder
+    │  Wave-gating: lowest incomplete wave per prefix picked first
     ▼
 Builder Pool (16 agents: 10 on M4 + 6 on M2 Pro, polling every 120s)
     │  Detect repo from task title → cd into it
-    │  Codex CLI → Kimi K2.5 → Ollama (fallback chain)
+    │  Codex CLI (primary) → Needs Founder on failure (no Kimi fallback)
     │  Implement → Test → Commit → Push → PR
     ▼
 Founder reviews PR → merge
@@ -44,10 +46,11 @@ Alternative entry: Claude Code → MCP vikunja_create_task → Builder
 │  AmneziaWG VPN (10.66.66.2)                          │
 └──────────────────────────────────────────────────────┘
 
-LLM Model Chain (all builders, fallback order):
+LLM Model Chain (all builders, updated 2026-03-13):
   1. Codex CLI (ChatGPT auth)  → primary coding, built-in file tools
-  2. Kimi K2.5 (Moonshot API)  → cloud fallback, unified diff protocol
-  3. Ollama qwen2.5-coder:7b   → local fallback, zero cloud cost
+  2. Ollama qwen2.5-coder:7b   → local fallback (MODEL: ollama only)
+  ✗ Kimi K2.5 removed — 5x more escalations than Codex
+  On failure: escalate to Needs Founder → manual Claude Code CLI (Sonnet/Opus 4.6)
 ```
 
 ## Key Concepts
@@ -121,7 +124,7 @@ mkdir -p ~/.config/axinova && chmod 700 ~/.config/axinova
 echo 'export APP_VIKUNJA__TOKEN=tk_...' > ~/.config/axinova/vikunja.env
 chmod 600 ~/.config/axinova/vikunja.env
 
-# Moonshot API key (for Kimi K2.5)
+# Moonshot API key (for OpenClaw orchestrator only — Kimi removed from builder chain)
 echo 'MOONSHOT_API_KEY=sk-...' > ~/.config/axinova/moonshot.env
 chmod 600 ~/.config/axinova/moonshot.env
 ```

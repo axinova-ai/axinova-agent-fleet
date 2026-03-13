@@ -36,35 +36,46 @@ poll_for_task() → check_task_validity() → claim_task() → execute_task()
 | Directive | Effect |
 |-----------|--------|
 | `MODEL: codex` | Force Codex CLI (gpt-5.4) |
-| `MODEL: kimi` | Force Kimi CLI (kimi-k2.5) |
 | `MODEL: ollama` | Force Ollama (local) |
 | `MODEL: founder` | Rejected in check_task_validity (safety net in select_model too) |
-| (none) | Default: try Codex first → fallback to Kimi |
+| (none) | Default: Codex CLI. On failure → Needs Founder → Claude Code CLI |
+
+## Priority-Based Routing (added 2026-03-13)
+
+Vikunja task priority (set at design time by founder):
+- Priority 1-3 → agent-eligible (Codex CLI)
+- Priority ≥4 → auto-escalate immediately to Needs Founder (no Codex attempt)
 
 ## Complexity Gate
 
-`estimate_complexity()` scores task description. If score ≥ 4, auto-escalates to Needs Founder.
+`estimate_complexity()` scores task description AND checks priority. If score ≥ 4 OR priority ≥ 4, auto-escalates to Needs Founder.
 
 Scoring signals:
+- Priority ≥4 → immediate escalation (short-circuits keyword scoring)
 - +2: wizard, onboarding, migration, refactor, redesign, admin panel
 - +2: multi.*(step|page|component|file)
 - +1: various scope keywords (API, database, auth, etc.)
 
+## Wave-Gating (added 2026-03-13)
+
+Tasks with labels matching `*-wave-N` (e.g., `steel-wave-2`) are gated:
+- Only the lowest incomplete wave per prefix is eligible for pickup
+- Tasks without wave labels are always eligible
+- A wave is "incomplete" if ANY of its tasks are not done
+
 ## Execution Flow
 
 ```
-1. Try Codex CLI (unless MODEL: kimi or MODEL: ollama)
+1. Priority check: if priority ≥ 4 → escalate immediately to Needs Founder
+2. Complexity check: if score ≥ 4 → escalate to Needs Founder
+3. Try Codex CLI (unless MODEL: ollama)
    - Timeout: CODEX_TIMEOUT (300s default)
    - Auto-commit if uncommitted changes left
-   - If 0 changes → fallback to selected model
-
-2. Try Kimi CLI (if Codex failed/skipped and model=kimi)
-   - Timeout: KIMI_TIMEOUT (600s default)
-   - Auto-commit if uncommitted changes left
-   - If 0 changes → escalate to Needs Founder
-
-3. Try Ollama (only if MODEL: ollama explicitly set)
+   - If 0 changes or failure → escalate to Needs Founder
+4. Try Ollama (only if MODEL: ollama explicitly set)
    - Diff-based approach (not CLI agent)
+
+Note: Kimi CLI removed from fallback chain (2026-03-13) — 5x more escalations than Codex.
 ```
 
 ## Post-Commit Validation
@@ -104,9 +115,10 @@ Run `scripts/tests/scheduler-e2e.sh` to verify all scheduling scenarios:
 ```
 
 Tests:
-- **T1**: MODEL: kimi routing
+- **T1**: Priority ≥4 auto-escalation to Needs Founder
 - **T2**: MODEL: codex routing
 - **T3**: MODEL: founder guard (negative test)
-- **T4**: Default model selection
+- **T4**: Default model → Codex CLI
 - **T5**: Race condition (only 1 agent claims)
 - **T6**: Complexity auto-escalation
+- **T7**: Blocked dependency → agents skip

@@ -23,7 +23,7 @@
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                       ORCHESTRATOR                                       │
 │                                                                          │
-│  OpenClaw (on M4, Kimi K2.5 via Moonshot API)                           │
+│  OpenClaw (on M4, Kimi K2.5 via Moonshot API — routing only)            │
 │  • Receives high-level intent from Founder                               │
 │  • Decomposes into atomic tasks (one PR each)                           │
 │  • Labels for categorization (NOT routing)                               │
@@ -46,7 +46,7 @@
 │  ┌─ M4 Mac Mini (agent01, 10.66.66.3) ──────────────────────────────┐  │
 │  │  10x Generic Builders (builder-1 to builder-10)                   │  │
 │  │  Also runs: OpenClaw, Local Console Bot                           │  │
-│  │  LLM chain: Codex CLI → Kimi K2.5 → Ollama (fallback)           │  │
+│  │  LLM: Codex CLI (gpt-5.4) → Needs Founder on failure            │  │
 │  └───────────────────────────────────────┬──────────────────────────┘  │
 │                                          │ Thunderbolt Bridge           │
 │  ┌─ M2 Pro Mac Mini (focusagent02, 10.66.66.2) ────────────────────┐  │
@@ -72,7 +72,7 @@
 Wei sends Discord message: "Ship user profile feature with backend API and frontend page"
     │
     ▼
-OpenClaw (Orchestrator, Kimi K2.5)
+OpenClaw (Orchestrator, Kimi K2.5 for routing)
     │  Decomposes into atomic tasks, maximizes parallelism
     ▼
 Vikunja tasks created simultaneously:
@@ -84,7 +84,7 @@ Vikunja tasks created simultaneously:
 4 generic builders claim 4 tasks in parallel
     │  Each builder: detect repo from title → cd ~/workspace/<repo>
     │  Read builder.md instructions + repo CLAUDE.md
-    │  Execute via Codex CLI (→ Kimi K2.5 → Ollama fallback)
+    │  Execute via Codex CLI (→ Needs Founder on failure)
     │  Implement → test → commit
     ▼
 agent-launcher.sh handles:
@@ -155,10 +155,10 @@ The orchestrator decomposes work so each task is atomic and produces exactly one
 
 | Machine | VPN IP | Role | Services | LLM |
 |---------|--------|------|----------|-----|
-| M1 MacBook Air | 10.66.66.18 | **Founder primary** | Claude Code (local), full dev env, fleet access | Claude Code |
-| M4 Mac Mini | 10.66.66.3 | Orchestrator + Builders | OpenClaw, 10 builders (1-10), Local Console Bot | Codex CLI + Kimi K2.5 |
+| M1 MacBook Air | 10.66.66.18 | **Founder primary** | Claude Code CLI (local), full dev env, fleet access | Claude Code CLI (Sonnet/Opus 4.6) |
+| M4 Mac Mini | 10.66.66.3 | Orchestrator + Builders | OpenClaw, 10 builders (1-10), Local Console Bot | Codex CLI (gpt-5.4) |
 | M2 Pro Mac Mini | 10.66.66.2 | Builders + LLM Server | 6 builders (11-16), Ollama (Qwen 2.5 Coder 7B) | Codex CLI + Ollama |
-| M1 Workstation | 10.66.66.4 | Founder mirror (planned) | Claude Code tunnel for phone access | Claude Code |
+| M1 Workstation | 10.66.66.4 | Founder mirror | Claude Code CLI for phone access | Claude Code CLI (Sonnet/Opus 4.6) |
 | VPN Server | 8.222.187.10 | Network hub | AmneziaWG, SOCKS5 relay | — |
 
 ## Builder Agent Details
@@ -169,7 +169,7 @@ The orchestrator decomposes work so each task is atomic and produces exactly one
 | Instructions | `agent-instructions/builder.md` (universal) |
 | LaunchAgent | `com.axinova.agent-builder-{1..10}` |
 | Poll interval | 120s |
-| LLM chain | Codex CLI → Kimi K2.5 (Moonshot) → Ollama qwen2.5-coder:7b |
+| LLM chain | Codex CLI (gpt-5.4) → Needs Founder → Claude Code CLI (Sonnet/Opus 4.6) |
 | Repo detection | Scan task title for `axinova-*` pattern |
 | Audit trail | Vikunja task comments: `[CLAIMED] → [STARTED] → [IN REVIEW]` |
 
@@ -220,7 +220,7 @@ Monthly Infrastructure:
 
 Monthly API:
   OpenAI Codex CLI:           ~$30-50/month (10 builders x task volume)
-  Moonshot/Kimi (OpenClaw):   ~$5-10/month (task routing only)
+  Moonshot/Kimi (OpenClaw):   ~$5-10/month (orchestrator routing only, removed from builders)
 
 Total:                        ~$50-75/month for 16 autonomous builders
 ```

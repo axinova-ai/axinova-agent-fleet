@@ -7,7 +7,7 @@ Founder (Wei)
     │  High-level intent: "ship feature X", "fix bug Y"
     │  Entry: Claude Code (MCP), Discord, Vikunja UI
     ▼
-Orchestrator (OpenClaw + Kimi K2.5)
+Orchestrator (OpenClaw, Kimi K2.5 for routing only)
     │  Decomposes intent into atomic tasks (one PR each)
     │  Labels for categorization, maximizes parallelism
     │  Creates in Vikunja Project 13
@@ -35,8 +35,8 @@ Wei operates as the human decision-maker at the top of the hierarchy.
 
 | Path | Machine | Use case |
 |------|---------|----------|
-| **Primary** | M1 MacBook Air (10.66.66.18) | Daily coding machine. Claude Code local, full dev env, SSH to fleet. |
-| **Mobile** | M1 Workstation (10.66.66.4, planned) | Remote mirror for phone access during day job (10-6). Limited to task creation and PR review. |
+| **Primary** | M1 MacBook Air (10.66.66.18) | Daily coding. Claude Code CLI (Sonnet/Opus 4.6), full dev env, SSH to fleet. |
+| **Mobile** | M1 Workstation (10.66.66.4) | Remote Claude Code CLI for phone access during day job (10-6). Task creation + PR review. |
 
 **Founder responsibilities:**
 - Define high-level goals and priorities
@@ -49,7 +49,7 @@ Wei operates as the human decision-maker at the top of the hierarchy.
 Runs on M4 as a launchd daemon. Receives messages from Discord and decomposes them into Vikunja tasks.
 
 **Key details:**
-- LLM: Moonshot/Kimi K2.5 (temperature 0.2)
+- LLM: Moonshot/Kimi K2.5 (temperature 0.2, routing/orchestration only — not used by builders)
 - System prompt: `openclaw/task-router-prompt.md`
 - Config: `openclaw/openclaw.json`
 - GFW bypass: SOCKS5 SSH tunnel to Singapore VPN server
@@ -94,10 +94,10 @@ agent-launcher.sh builder-N ~/workspace 120
     │
     ├── Detect repo: scan task title for axinova-* → cd ~/workspace/<repo>
     │
-    ├── Execute: multi-model fallback chain
-    │   ├─ Codex CLI (primary) — ChatGPT auth, built-in file tools
-    │   ├─ Kimi K2.5 (fallback) — Moonshot API, unified diff
-    │   └─ Ollama qwen2.5-coder:7b (local) — zero cloud cost
+    ├── Execute: Codex CLI (primary, only automated model)
+    │   ├─ Priority ≥4 → auto-escalate to Needs Founder (no Codex attempt)
+    │   ├─ Codex CLI (gpt-5.4) — ChatGPT auth, built-in file tools
+    │   ├─ On failure → Needs Founder → manual Claude Code CLI (Kimi removed 2026-03-13)
     │   └── Reads agent-instructions/builder.md + repo CLAUDE.md
     │
     ├── Test: make test (Go) / npm run build (Vue)

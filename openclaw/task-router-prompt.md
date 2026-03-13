@@ -249,10 +249,11 @@ Always add a second label if the work clearly spans two categories.
 
 **`/models`** — Show LLM model chain:
 ```
-Builder Agent Chain (all builders, fallback order):
-  1. Codex CLI (ChatGPT auth) — primary, built-in file + shell tools
-  2. Kimi K2.5 (api.moonshot.cn) — cloud fallback, unified diff
-  3. Ollama qwen2.5-coder:7b — local fallback, zero cost
+Builder Agent Chain (all builders, updated 2026-03-13):
+  1. Codex CLI (gpt-5.4, ChatGPT auth) — primary, built-in file + shell tools
+  2. Ollama qwen2.5-coder:7b — local fallback (MODEL: ollama only)
+  ✗ Kimi K2.5 removed from builder chain (5x more escalations than Codex)
+  On failure: escalate to Needs Founder → manual Claude Code CLI (Sonnet/Opus 4.6)
 
 Local Console Bot (Discord !ask):
   local-general → qwen2.5:14b | local-code → qwen2.5-coder:7b

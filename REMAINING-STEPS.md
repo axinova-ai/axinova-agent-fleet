@@ -44,11 +44,11 @@ cd ~/workspace/axinova-home-go
 codex
 ```
 
-## Step 3: Moonshot (Kimi) API Key
+## Step 3: Moonshot (Kimi) API Key — OpenClaw Orchestrator Only
 
 Get API key from https://platform.moonshot.cn/
 
-Then set it on M4 where OpenClaw runs:
+**Note:** Kimi K2.5 is only used by OpenClaw (orchestrator) for task routing. It was removed from the builder fallback chain on 2026-03-13. Builders use Codex CLI only.
 
 ```bash
 ssh agent01@192.168.3.6
@@ -154,7 +154,7 @@ cd ~/workspace/axinova-agent-fleet/openclaw
 ## Architecture Summary
 
 ```
-Discord → OpenClaw (Kimi K2.5) → Vikunja task
+Discord → OpenClaw (Kimi K2.5, routing only) → Vikunja task
                                        ↓
                               agent-launcher.sh polls
                                        ↓
@@ -178,4 +178,4 @@ Discord → OpenClaw (Kimi K2.5) → Vikunja task
 - [x] `axinova-agent-fleet` + `axinova-mcp-server-go` cloned on both
 - [x] Launchd plists updated for agent01/focusagent02
 - [x] agent-launcher.sh rewritten for Codex CLI + direct Vikunja API
-- [x] openclaw.json configured for Kimi K2.5 (API key placeholder)
+- [x] openclaw.json configured for Kimi K2.5 (orchestrator only, API key placeholder)
