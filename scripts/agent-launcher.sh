@@ -632,9 +632,11 @@ setup_worktree() {
   # Create worktree with a new branch from origin/main
   mkdir -p "$(dirname "$worktree_dir")"
   if git -C "$repo_path" worktree add "$worktree_dir" -b "$branch_name" origin/main 2>>"$LOG_FILE"; then
-    log "Worktree created: $worktree_dir (branch: $branch_name)"
+    # NOTE: log() uses tee→stdout. This function is called as $(setup_worktree ...),
+    # so ALL stdout is captured. Redirect log to stderr to keep return value clean.
+    log "Worktree created: $worktree_dir (branch: $branch_name)" >&2
   else
-    log "ERROR: Failed to create worktree for $branch_name"
+    log "ERROR: Failed to create worktree for $branch_name" >&2
     return 1
   fi
 
@@ -663,9 +665,9 @@ setup_worktree_existing() {
 
   mkdir -p "$(dirname "$worktree_dir")"
   if git -C "$repo_path" worktree add --track -b "$branch_name" "$worktree_dir" "origin/$branch_name" 2>>"$LOG_FILE"; then
-    log "Worktree created (existing branch): $worktree_dir (branch: $branch_name)"
+    log "Worktree created (existing branch): $worktree_dir (branch: $branch_name)" >&2
   else
-    log "ERROR: Failed to create worktree for existing branch $branch_name"
+    log "ERROR: Failed to create worktree for existing branch $branch_name" >&2
     return 1
   fi
 
