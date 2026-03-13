@@ -301,16 +301,25 @@ select_model() {
     return
   fi
 
-  # Priority 2: Default → Kimi K2.5 (cloud, high quality)
-  # Ollama fallback removed — diff quality too low for automated execution.
+  # Priority 2: Default → Codex CLI (primary automated model)
+  # Kimi fallback removed — 5x more escalations than Codex, often exits with 0 changes.
+  # If Codex fails, escalate directly to Needs Founder for manual Claude Code pickup.
   # Ollama only runs if explicitly requested via MODEL: ollama override.
-  echo "kimi"
+  echo "codex"
 }
 
 estimate_complexity() {
-  local title="$1" desc="$2"
+  local title="$1" desc="$2" priority="${3:-0}"
   local score=0
   local text="$title $desc"
+
+  # Priority-based routing (set at task design time by founder using Opus):
+  #   1=trivial, 2=simple, 3=medium → agent-eligible
+  #   4=hard, 5=founder-only → auto-escalate immediately
+  if [[ "$priority" -ge 4 ]]; then
+    echo "$priority"
+    return
+  fi
 
   # Multi-component signals (+2 each)
   echo "$text" | grep -qiE 'wizard|onboarding|migration|refactor|redesign|admin panel' && score=$((score + 2))
@@ -730,10 +739,54 @@ resolve_bucket_for_project() {
   fi
 }
 
+# --- Wave-Gating ---
+# Labels matching *-wave-N gate task pickup order within a project.
+# For each wave prefix (e.g., "steel"), only the lowest incomplete wave is eligible.
+# Tasks without a wave label are always eligible (no gating).
+# A wave is "incomplete" if ANY of its tasks across ALL buckets are not done.
+filter_by_wave_gate() {
+  local todo_candidates="$1"    # JSON array: tasks in To-Do with percent_done==0
+  local all_undone="$2"         # JSON array: all undone tasks across all buckets
+
+  # Step 1: Extract min wave per prefix from all undone tasks (tiny JSON, safe for --argjson).
+  # Passing full all_undone (~80KB) as --argjson hits shell ARG_MAX limits on macOS.
+  local min_waves
+  min_waves=$(echo "$all_undone" | jq -c '
+    [.[].labels[]?.title // empty]
+    | map(capture("^(?<pfx>.+)-wave-(?<num>[0-9]+)$") // empty)
+    | map({prefix: .pfx, num: (.num | tonumber)})
+    | group_by(.prefix)
+    | map({key: .[0].prefix, value: (map(.num) | min)})
+    | from_entries
+  ' 2>/dev/null) || min_waves="{}"
+
+  [[ -z "$min_waves" || "$min_waves" == "null" ]] && min_waves="{}"
+
+  # Step 2: Filter candidates using the small min_waves map
+  echo "$todo_candidates" | jq -c --argjson mw "$min_waves" '
+    def wave_info:
+      [.labels[]?.title // empty]
+      | map(capture("^(?<pfx>.+)-wave-(?<num>[0-9]+)$") // empty)
+      | map({prefix: .pfx, num: (.num | tonumber)});
+
+    [.[] | . as $task |
+      ($task | wave_info) as $task_waves |
+      if ($task_waves | length) == 0 then
+        $task
+      elif ($task_waves | all(. as $w | $mw[$w.prefix] == $w.num)) then
+        $task
+      else
+        empty
+      end
+    ]
+  ' 2>/dev/null || echo "$todo_candidates"
+}
+
 # --- Task Polling ---
 # Uses the Kanban view API to fetch ONLY tasks in the To-Do bucket.
 # Any task in To-Do (regardless of percent_done) is eligible for pickup.
 # Tasks in Doing/Done/In Review/Needs Founder are NOT picked up.
+# Wave-gated: within each project, only the lowest incomplete wave is eligible.
 
 # Run project discovery at startup
 discover_eligible_projects
@@ -758,20 +811,56 @@ poll_for_task() {
     b_todo=$(get_project_field "$config" 3)
 
     local view_data
-    view_data=$(vikunja_api GET "/projects/$pid/views/$view_id/tasks?per_page=50" 2>/dev/null) || continue
+    # Sanitize: Vikunja can return bare control chars in HTML descriptions that break jq
+    view_data=$(vikunja_api GET "/projects/$pid/views/$view_id/tasks?per_page=50" 2>/dev/null | python3 -c "
+import sys
+raw = sys.stdin.buffer.read()
+sys.stdout.buffer.write(bytes(b if b >= 32 or b in (10, 13, 9) else 32 for b in raw))
+" 2>/dev/null) || continue
 
     local candidates
     candidates=$(echo "$view_data" | jq -c --argjson todo "$b_todo" '
       [.[] | select(.id == $todo) | .tasks[]? | select(.done == false and .percent_done == 0)]
     ' 2>/dev/null) || continue
 
+    # Wave-gating: only pick tasks from the lowest incomplete wave per prefix.
+    # Labels like "steel-wave-3" or "auth-wave-1" are parsed as prefix="steel" wave=3.
+    # Tasks with no wave label are always eligible.
+    # A wave is "complete" only when ALL its tasks across ALL buckets are done.
+    local all_undone
+    all_undone=$(echo "$view_data" | jq -c '
+      [.[] | .tasks[]? | select(.done == false)]
+    ' 2>/dev/null) || all_undone="[]"
+
+    local pre_gate_count
+    pre_gate_count=$(echo "$candidates" | jq 'length' 2>/dev/null || echo "0")
+
+    candidates=$(filter_by_wave_gate "$candidates" "$all_undone") || candidates="[]"
+
     local count
     count=$(echo "$candidates" | jq 'length' 2>/dev/null || echo "0")
 
+    if [[ "$pre_gate_count" -gt 0 && "$count" != "$pre_gate_count" ]]; then
+      local active_waves
+      active_waves=$(echo "$all_undone" | jq -r '
+        [.[].labels[]?.title // empty]
+        | map(capture("^(?<pfx>.+)-wave-(?<num>[0-9]+)$") // empty)
+        | group_by(.prefix) | map(.[0].prefix + "-wave-" + (map(.num | tonumber) | min | tostring))
+        | join(", ")
+      ' 2>/dev/null || echo "unknown")
+      # Log to file only (not stdout) — poll_for_task returns JSON on stdout
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$AGENT_ID] Wave-gate project $pid: $pre_gate_count To-Do → $count eligible (active: $active_waves)" >> "$LOG_FILE"
+    fi
+
     if [[ "$count" -gt 0 && "$count" != "null" ]]; then
       local idx=$(( RANDOM % count ))
-      echo "$candidates" | jq -c ".[$idx]"
-      return
+      local selected
+      selected=$(echo "$candidates" | jq -c ".[$idx]")
+      if [[ -n "$selected" && "$selected" != "null" ]]; then
+        echo "$selected"
+        return
+      fi
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$AGENT_ID] DEBUG: wave-gate count=$count idx=$idx but jq returned empty for project $pid" >> "$LOG_FILE"
     fi
   done <<< "$shuffled_configs"
 
@@ -1461,9 +1550,8 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       if [[ "$codex_commit_count" -gt 0 ]]; then
         execution_success=true
       else
-        log "Codex exited successfully but produced no changes — falling back to $selected_model"
-        add_task_comment "$task_id" "[FALLBACK] Codex produced 0 changes (exit 0 but no commits), trying $selected_model | Agent: $AGENT_ID"
-        model_used="$selected_model"
+        log "Codex exited successfully but produced no changes — escalating to Needs Founder"
+        add_task_comment "$task_id" "[BLOCKED] Codex produced 0 changes (exit 0, no commits). Escalating to Needs Founder for manual Claude Code pickup. | Agent: $AGENT_ID"
       fi
     else
       codex_exit=$?
@@ -1471,95 +1559,25 @@ Model: codex-cli/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       log_codex_audit "$task_id" "initial" "$codex_exit" "$((codex_end - codex_start))"
       echo "$codex_output" >> "$LOG_FILE"
       if [[ "$codex_exit" -eq 124 ]]; then
-        log "Codex CLI TIMED OUT after ${CODEX_TIMEOUT}s, falling back to $selected_model"
-        add_task_comment "$task_id" "[TIMEOUT] Codex CLI timed out after ${CODEX_TIMEOUT}s, switching to $selected_model | Agent: $AGENT_ID"
+        log "Codex CLI TIMED OUT after ${CODEX_TIMEOUT}s — escalating to Needs Founder"
+        add_task_comment "$task_id" "[TIMEOUT] Codex CLI timed out after ${CODEX_TIMEOUT}s. Escalating to Needs Founder for manual Claude Code pickup. | Agent: $AGENT_ID"
       else
-        log "Codex CLI failed (exit $codex_exit), falling back to $selected_model"
-        add_task_comment "$task_id" "[FALLBACK] Codex CLI failed (exit $codex_exit), switching to $selected_model | Agent: $AGENT_ID"
+        log "Codex CLI failed (exit $codex_exit) — escalating to Needs Founder"
+        add_task_comment "$task_id" "[BLOCKED] Codex CLI failed (exit $codex_exit). Escalating to Needs Founder for manual Claude Code pickup. | Agent: $AGENT_ID"
       fi
       model_used="$selected_model"
     fi
   else
-    model_used="$selected_model"
-    add_task_comment "$task_id" "[STARTED] Model: $selected_model (codex unavailable) | Repo: $REPO_NAME | Agent: $AGENT_ID"
+    log "Codex CLI not available — escalating to Needs Founder"
+    add_task_comment "$task_id" "[BLOCKED] Codex CLI not available on this agent. Escalating to Needs Founder. | Agent: $AGENT_ID"
+    escalate_task_to_founder "$task_id" "$task_title" "Codex CLI not available on agent $AGENT_ID. Needs manual Claude Code execution."
+    git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
+    return 0
   fi
 
-  # --- Fallback: Kimi CLI (same pattern as Codex — direct file editing) ---
-  if [[ "$execution_success" == "false" && "$model_used" == "kimi" ]]; then
-    if check_kimi_cli_available; then
-      log "Attempting Kimi CLI execution (model: kimi-k2.5)..."
-      model_used="kimi-cli/kimi-k2.5"
-      add_task_comment "$task_id" "[STARTED] Model: kimi-cli/kimi-k2.5 | Repo: $REPO_NAME | Agent: $AGENT_ID"
-
-      local kimi_prompt="You are a builder agent working on the $REPO_NAME repository.
-
-## Task #$task_id: $task_title
-
-$task_description
-$history_section
-## Instructions
-$role_instructions
-
-## Workflow
-1. Implement the changes described in the task
-2. Run tests to verify your changes work (make test for Go, npm run build for Vue)
-3. Stage and commit your changes with a descriptive commit message
-4. Do NOT push or create PRs - that will be handled separately
-
-## Important
-- Follow the existing code conventions in this repository
-- Read CLAUDE.md in the repo root for project-specific guidance
-- Keep changes focused on the task - don't refactor unrelated code
-- If tests fail, fix them before committing
-- Your commit message MUST reference Task #$task_id (not any other task number)
-- Use commit message format: '[builder] Task #$task_id: <description>'
-- ONLY create or modify files directly related to the task title
-- Do NOT create views, components, or handlers for features not mentioned in the task
-- If you need a dependency that doesn't exist yet, leave a TODO comment instead of implementing it"
-
-      local kimi_output
-      local kimi_start kimi_end kimi_exit
-      kimi_start=$(date +%s)
-      if kimi_output=$(_timeout "$KIMI_TIMEOUT" kimi \
-        --yolo \
-        --print \
-        -m "kimi-k2.5" \
-        -w "$REPO_PATH" \
-        -p "$kimi_prompt" \
-        2>&1); then
-        kimi_exit=$?
-      else
-        kimi_exit=$?
-      fi
-      kimi_end=$(date +%s)
-      log "Kimi CLI execution completed (exit=$kimi_exit, $((kimi_end - kimi_start))s)"
-      echo "$kimi_output" >> "$LOG_FILE"
-
-      # Auto-commit if Kimi modified files but didn't commit
-      cd "$REPO_PATH"
-      if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-        log "Kimi left uncommitted changes, auto-committing..."
-        git add -A
-        git commit -m "[builder] Task #$task_id: $task_title
-
-Automated by Axinova Agent Fleet ($AGENT_ID, Kimi CLI)
-Model: kimi-cli/kimi-k2.5" 2>>"$LOG_FILE" || true
-      fi
-
-      # Check if Kimi produced commits
-      local kimi_commit_count
-      kimi_commit_count=$(git log origin/main.."$branch_name" --oneline 2>/dev/null | wc -l | tr -d ' ') || kimi_commit_count=0
-      if [[ "$kimi_commit_count" -gt 0 ]]; then
-        execution_success=true
-      else
-        log "Kimi CLI produced no changes — escalating"
-        add_task_comment "$task_id" "[BLOCKED] Kimi CLI produced 0 changes (exit $kimi_exit, $((kimi_end - kimi_start))s). | Agent: $AGENT_ID"
-      fi
-    else
-      log "Kimi CLI not available — escalating"
-      add_task_comment "$task_id" "[BLOCKED] Kimi CLI not installed. | Agent: $AGENT_ID"
-    fi
-  fi
+  # --- Kimi fallback removed (2026-03-13) ---
+  # Kimi CLI had 5x more escalations than Codex and often exited with 0 changes.
+  # If Codex fails, escalate directly to Needs Founder for manual Claude Code pickup.
 
   # --- Ollama only runs if explicitly requested via MODEL: ollama ---
   if [[ "$execution_success" == "false" && "$model_used" == "ollama" ]]; then
@@ -2395,6 +2413,7 @@ while true; do
   if [[ "$TASK_ID" != "0" && "$TASK_ID" != "null" && -n "$TASK_ID" ]]; then
     TASK_TITLE=$(echo "$TASK_JSON" | jq -r '.title // "Untitled"' 2>/dev/null || echo "Untitled")
     TASK_DESC=$(echo "$TASK_JSON" | jq -r '.description // ""' 2>/dev/null || echo "")
+    TASK_PRIORITY=$(echo "$TASK_JSON" | jq -r '.priority // 0' 2>/dev/null || echo "0")
     # Cache the project_id for this task so move_to_bucket can skip the GET
     ACTIVE_TASK_PROJECT_ID=$(echo "$TASK_JSON" | jq -r '.project_id // 0' 2>/dev/null || echo "0")
 
@@ -2444,12 +2463,13 @@ while true; do
     fi
 
     # Complexity heuristic: auto-escalate complex tasks to founder
+    # Priority ≥4 (set at design time) bypasses keyword scoring entirely
     _complexity_score=0
-    _complexity_score=$(estimate_complexity "$TASK_TITLE" "$TASK_DESC") || _complexity_score=0
-    log "Task #$TASK_ID complexity score: $_complexity_score"
+    _complexity_score=$(estimate_complexity "$TASK_TITLE" "$TASK_DESC" "$TASK_PRIORITY") || _complexity_score=0
+    log "Task #$TASK_ID complexity score: $_complexity_score (priority: $TASK_PRIORITY)"
     if [[ "$_complexity_score" -ge 4 ]]; then
       log "Task #$TASK_ID: complexity score $_complexity_score >= 4 — escalating to founder"
-      escalate_task_to_founder "$TASK_ID" "$TASK_TITLE" "Auto-escalated: complexity score $_complexity_score (threshold: 4). Task likely needs multi-component work best handled by Claude Code."
+      escalate_task_to_founder "$TASK_ID" "$TASK_TITLE" "Auto-escalated: complexity score $_complexity_score (priority: $TASK_PRIORITY, threshold: 4). Task needs manual Claude Code work."
       sleep "$POLL_INTERVAL"
       continue
     fi

@@ -137,22 +137,24 @@ RESULT_T1="SKIP" RESULT_T2="SKIP" RESULT_T3="SKIP"
 RESULT_T4="SKIP" RESULT_T5="SKIP" RESULT_T6="SKIP"
 RESULT_T7="SKIP"
 
-run_test_t1_kimi_route() {
-  echo -e "\n${CYAN}[T1] MODEL: kimi — Kimi CLI routing${NC}"
+run_test_t1_priority_escalation() {
+  echo -e "\n${CYAN}[T1] Priority 4 — auto-escalate to Needs Founder${NC}"
   local tid
   tid=$(create_task \
-    "$TEST_PREFIX [T1] Echo kimi route test — axinova-miniapp-builder-go" \
-    "<p>MODEL: kimi</p><p>$TEST_PREFIX Scheduler test T1</p><h2>Task</h2><p>Create a file <code>test-t1-kimi.txt</code> in the repo root containing: test-t1-kimi-ok</p>")
+    "$TEST_PREFIX [T1] Priority escalation test — axinova-miniapp-builder-go" \
+    "<p>$TEST_PREFIX Scheduler test T1</p><h2>Task</h2><p>This task has priority 4 and should auto-escalate.</p>")
   TEST_IDS+=("$tid")
   echo "  Created task #$tid"
+  # Set priority to 4 (hard — founder-only)
+  vikunja_api POST "/tasks/$tid" -d '{"priority": 4}' >/dev/null 2>&1
 
   check_t1() {
     local comments
     comments=$(get_task_comments "$tid") || return 1
-    echo "$comments" | grep -q "kimi-cli/kimi-k2.5"
+    echo "$comments" | grep -q "NEEDS FOUNDER"
   }
 
-  if wait_for_condition "agent uses Kimi CLI" check_t1 "$TIMEOUT"; then
+  if wait_for_condition "auto-escalated via priority" check_t1 "$TIMEOUT"; then
     RESULT_T1="PASS"
   else
     RESULT_T1="FAIL"
@@ -213,7 +215,7 @@ run_test_t3_founder_guard() {
 }
 
 run_test_t4_default_model() {
-  echo -e "\n${CYAN}[T4] No MODEL override — default to kimi${NC}"
+  echo -e "\n${CYAN}[T4] No MODEL override — default to Codex CLI${NC}"
   local tid
   tid=$(create_task \
     "$TEST_PREFIX [T4] Default model test — axinova-miniapp-builder-go" \
@@ -224,11 +226,11 @@ run_test_t4_default_model() {
   check_t4() {
     local comments
     comments=$(get_task_comments "$tid") || return 1
-    # Should use kimi as default (or codex first then kimi fallback)
-    echo "$comments" | grep -qE "(kimi-cli|codex-cli)"
+    # Should use codex-cli as default (Kimi fallback removed)
+    echo "$comments" | grep -q "codex-cli"
   }
 
-  if wait_for_condition "agent picks up with default model" check_t4 "$TIMEOUT"; then
+  if wait_for_condition "agent picks up with Codex CLI" check_t4 "$TIMEOUT"; then
     RESULT_T4="PASS"
   else
     RESULT_T4="FAIL"
@@ -405,10 +407,10 @@ print_results() {
     elif [[ "$result" == "FAIL" ]]; then color="$RED"; fail=$((fail + 1)); fi
     local desc=""
     case $test_name in
-      T1) desc="MODEL: kimi -> Kimi CLI routing";;
+      T1) desc="Priority 4 -> auto-escalate to Needs Founder";;
       T2) desc="MODEL: codex -> Codex CLI routing";;
       T3) desc="MODEL: founder -> agents skip";;
-      T4) desc="No MODEL -> default model selection";;
+      T4) desc="No MODEL -> default Codex CLI";;
       T5) desc="Race -> only 1 agent claims";;
       T6) desc="Complexity -> auto-escalation";;
       T7) desc="Blocked dependency -> agents skip until resolved";;
@@ -452,7 +454,7 @@ main() {
   # These run in sequence but verify in parallel via polling
   run_test_t6_complexity
   run_test_t5_race
-  run_test_t1_kimi_route
+  run_test_t1_priority_escalation
   run_test_t2_codex_route
   run_test_t4_default_model
 
