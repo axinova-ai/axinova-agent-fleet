@@ -173,7 +173,7 @@ run_test_t2_codex_route() {
   check_t2() {
     local comments
     comments=$(get_task_comments "$tid") || return 1
-    echo "$comments" | grep -q "codex-cli"
+    echo "$comments" | grep -q "codex-exec"
   }
 
   if wait_for_condition "agent uses Codex CLI" check_t2 "$TIMEOUT"; then
@@ -226,8 +226,8 @@ run_test_t4_default_model() {
   check_t4() {
     local comments
     comments=$(get_task_comments "$tid") || return 1
-    # Should use codex-cli as default (Kimi fallback removed)
-    echo "$comments" | grep -q "codex-cli"
+    # Should use codex-exec as default (Kimi fallback removed)
+    echo "$comments" | grep -q "codex-exec"
   }
 
   if wait_for_condition "agent picks up with Codex CLI" check_t4 "$TIMEOUT"; then
