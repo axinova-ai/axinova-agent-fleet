@@ -434,18 +434,20 @@ build_diff_prompt() {
   local task_history="${5:-}"
 
   # Gather repo context: file tree (depth 3), recent git log, key file contents
+  # Use WORK_DIR (worktree) if set, otherwise fall back to REPO_PATH
+  local _ctx_dir="${WORK_DIR:-$REPO_PATH}"
   local file_tree recent_log key_files_content
-  file_tree=$(find "$REPO_PATH" -maxdepth 3 -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' | head -100 2>/dev/null || true)
-  recent_log=$(git -C "$REPO_PATH" log --oneline -5 2>/dev/null || true)
+  file_tree=$(find "$_ctx_dir" -maxdepth 3 -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' | head -100 2>/dev/null || true)
+  recent_log=$(git -C "$_ctx_dir" log --oneline -5 2>/dev/null || true)
 
   # Include contents of files likely to be modified (Makefile, main.go, relevant source)
   # This gives the LLM accurate context lines for diffs
   key_files_content=""
   local _kf
   for _kf in Makefile go.mod cmd/service/main.go cmd/seed/main.go scripts/seed-dev.go package.json src/main.ts; do
-    if [[ -f "$REPO_PATH/$_kf" ]]; then
+    if [[ -f "$_ctx_dir/$_kf" ]]; then
       local _content
-      _content=$(head -80 "$REPO_PATH/$_kf" 2>/dev/null || true)
+      _content=$(head -80 "$_ctx_dir/$_kf" 2>/dev/null || true)
       if [[ -n "$_content" ]]; then
         key_files_content="${key_files_content}
 ### File: $_kf
@@ -550,7 +552,7 @@ apply_diff() {
     return 1
   fi
 
-  cd "$REPO_PATH"
+  cd "${WORK_DIR:-$REPO_PATH}"
 
   # Write diff to temp file
   local diff_file
@@ -596,6 +598,88 @@ detect_repo_path() {
   repo_name=$(echo "$text" | grep -oE 'axinova-[a-zA-Z0-9_-]+' | head -1)
   if [[ -n "$repo_name" && -d "$WORKSPACE/$repo_name" ]]; then
     echo "$WORKSPACE/$repo_name"
+  fi
+}
+
+# --- Git Worktree Helpers ---
+# Each agent task gets an isolated worktree so multiple agents can work on the
+# same repo simultaneously without interfering with each other.
+WORKTREE_BASE="$HOME/worktrees"
+mkdir -p "$WORKTREE_BASE"
+
+# Create a new worktree branching from origin/main.
+# Usage: setup_worktree <repo_path> <branch_name>
+# Prints: the worktree directory path
+setup_worktree() {
+  local repo_path="$1"
+  local branch_name="$2"
+  local repo_name
+  repo_name=$(basename "$repo_path")
+  # Flatten branch slashes to dashes for the directory name
+  local worktree_dir="$WORKTREE_BASE/${repo_name}/${branch_name//\//-}"
+
+  # Clean up stale worktree if it exists from a previous run
+  if [[ -d "$worktree_dir" ]]; then
+    git -C "$repo_path" worktree remove --force "$worktree_dir" 2>/dev/null || rm -rf "$worktree_dir"
+  fi
+
+  # Fetch latest main
+  git -C "$repo_path" fetch origin main 2>>"$LOG_FILE" || true
+
+  # Delete the local branch if it exists (stale from previous attempt)
+  git -C "$repo_path" branch -D "$branch_name" 2>/dev/null || true
+
+  # Create worktree with a new branch from origin/main
+  mkdir -p "$(dirname "$worktree_dir")"
+  if git -C "$repo_path" worktree add "$worktree_dir" -b "$branch_name" origin/main 2>>"$LOG_FILE"; then
+    log "Worktree created: $worktree_dir (branch: $branch_name)"
+  else
+    log "ERROR: Failed to create worktree for $branch_name"
+    return 1
+  fi
+
+  echo "$worktree_dir"
+}
+
+# Create a worktree for an existing remote branch (e.g., PR fixes).
+# Usage: setup_worktree_existing <repo_path> <branch_name>
+# Prints: the worktree directory path
+setup_worktree_existing() {
+  local repo_path="$1"
+  local branch_name="$2"
+  local repo_name
+  repo_name=$(basename "$repo_path")
+  local worktree_dir="$WORKTREE_BASE/${repo_name}/${branch_name//\//-}"
+
+  # Clean up stale worktree
+  if [[ -d "$worktree_dir" ]]; then
+    git -C "$repo_path" worktree remove --force "$worktree_dir" 2>/dev/null || rm -rf "$worktree_dir"
+  fi
+
+  git -C "$repo_path" fetch origin "$branch_name" main 2>>"$LOG_FILE" || true
+
+  # Delete stale local branch so checkout tracks remote
+  git -C "$repo_path" branch -D "$branch_name" 2>/dev/null || true
+
+  mkdir -p "$(dirname "$worktree_dir")"
+  if git -C "$repo_path" worktree add --track -b "$branch_name" "$worktree_dir" "origin/$branch_name" 2>>"$LOG_FILE"; then
+    log "Worktree created (existing branch): $worktree_dir (branch: $branch_name)"
+  else
+    log "ERROR: Failed to create worktree for existing branch $branch_name"
+    return 1
+  fi
+
+  echo "$worktree_dir"
+}
+
+# Remove a worktree and its local branch.
+# Usage: cleanup_worktree <repo_path> <worktree_dir>
+cleanup_worktree() {
+  local repo_path="$1"
+  local worktree_dir="$2"
+  if [[ -n "$worktree_dir" && -d "$worktree_dir" ]]; then
+    git -C "$repo_path" worktree remove --force "$worktree_dir" 2>>"$LOG_FILE" || rm -rf "$worktree_dir"
+    log "Worktree removed: $worktree_dir"
   fi
 }
 
@@ -1236,6 +1320,16 @@ execute_wiki_task() {
   [[ -z "$REPO_PATH" ]] && REPO_PATH="$WORKSPACE/axinova-agent-fleet"
   REPO_NAME=$(basename "$REPO_PATH")
   log "Executing wiki task #$task_id: $task_title (repo: $REPO_NAME)"
+
+  # Create isolated worktree for this wiki task
+  local branch_name="agent/${AGENT_ID}/task-${task_id}"
+  local WORK_DIR=""
+  WORK_DIR=$(setup_worktree "$REPO_PATH" "$branch_name") || true
+  if [[ -z "$WORK_DIR" || ! -d "$WORK_DIR" ]]; then
+    log "ERROR: Failed to create worktree for wiki task #$task_id"
+    escalate_task_to_founder "$task_id" "$task_title" "Worktree creation failed for wiki task in $REPO_NAME."
+    return
+  fi
   add_task_comment "$task_id" "[STARTED] Wiki task | Model: codex-exec/$CODEX_MODEL | Agent: $AGENT_ID"
 
   # Extract WIKI_PAGES: list from description (comma-separated page names)
@@ -1292,7 +1386,7 @@ ${pages_context}
 
     local wiki_codex_start wiki_codex_end wiki_codex_exit
     wiki_codex_start=$(date +%s)
-    if _timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$REPO_PATH" "$codex_prompt" >>"$LOG_FILE" 2>&1; then
+    if _timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$WORK_DIR" "$codex_prompt" >>"$LOG_FILE" 2>&1; then
       wiki_codex_exit=0
       wiki_codex_end=$(date +%s)
       log_codex_audit "$task_id" "wiki" "0" "$((wiki_codex_end - wiki_codex_start))"
@@ -1314,7 +1408,7 @@ ${pages_context}
   # Kimi had 5x more escalations than Codex. If Codex fails, escalate to Needs Founder.
 
   # Handle any git changes (docs/ files created by Codex)
-  cd "$REPO_PATH"
+  cd "$WORK_DIR"
   local has_git_changes=false
   if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
     has_git_changes=true
@@ -1329,9 +1423,8 @@ Automated by Axinova Agent Fleet (wiki task)" 2>>"$LOG_FILE" || true
 
   if [[ "$execution_success" == "true" ]]; then
     if [[ "$has_git_changes" == "true" ]]; then
-      # Repo changes → push + PR (then review)
+      # Repo changes → push + PR (already on task branch via worktree)
       local branch_name="agent/${AGENT_ID}/task-${task_id}"
-      git checkout -b "$branch_name" 2>>"$LOG_FILE" || true
       git push -u origin "$branch_name" 2>>"$LOG_FILE" || true
       local pr_url
       pr_url=$(gh pr create \
@@ -1361,7 +1454,7 @@ Automated by Axinova Agent Fleet (wiki task)" 2>>"$LOG_FILE" || true
     escalate_task_to_founder "$task_id" "$task_title" "Wiki task execution failed. Escalating to Needs Founder for manual pickup (Codex CLI or Claude Code CLI)."
   fi
 
-  git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
+  cleanup_worktree "$REPO_PATH" "$WORK_DIR"
 }
 
 # --- Task Execution (multi-model) ---
@@ -1393,18 +1486,14 @@ execute_task() {
   REPO_NAME=$(basename "$REPO_PATH")
   log "Detected repo: $REPO_NAME"
 
-  # Clean working tree and create fresh branch from origin/main
-  cd "$REPO_PATH"
-  git checkout main 2>>"$LOG_FILE" || true
-  git reset --hard HEAD 2>>"$LOG_FILE" || true
-  git clean -fd 2>>"$LOG_FILE" || true
-  git fetch origin main 2>>"$LOG_FILE" || true
-  git reset --hard origin/main 2>>"$LOG_FILE" || true
-  # Delete old branch if it exists, then create fresh
-  git branch -D "$branch_name" 2>/dev/null || true
-  git checkout -b "$branch_name" origin/main 2>>"$LOG_FILE" || {
-    git checkout "$branch_name" 2>>"$LOG_FILE" || true
-  }
+  # Create an isolated worktree for this task (no shared state with other agents)
+  local WORK_DIR=""
+  WORK_DIR=$(setup_worktree "$REPO_PATH" "$branch_name") || true
+  if [[ -z "$WORK_DIR" || ! -d "$WORK_DIR" ]]; then
+    log "ERROR: Failed to create worktree for task #$task_id"
+    escalate_task_to_founder "$task_id" "$task_title" "Worktree creation failed for $REPO_NAME. Check disk space or stale worktrees."
+    return
+  fi
 
   # Fetch task comments for context from previous attempts
   local task_history=""
@@ -1490,7 +1579,7 @@ $role_instructions
     if codex_output=$(_timeout "$CODEX_TIMEOUT" codex exec \
       --full-auto \
       --model "$CODEX_MODEL" \
-      -C "$REPO_PATH" \
+      -C "$WORK_DIR" \
       "$codex_prompt" \
       2>&1); then
       codex_exit=$?
@@ -1500,7 +1589,7 @@ $role_instructions
       log "Codex CLI execution completed (${codex_exit}, $((codex_end - codex_start))s)"
 
       # Safety net: if Codex modified files but didn't commit, auto-commit
-      cd "$REPO_PATH"
+      cd "$WORK_DIR"
       if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
         log "Codex left uncommitted changes, auto-committing..."
         git add -A
@@ -1537,7 +1626,7 @@ Model: codex-exec/$CODEX_MODEL" 2>>"$LOG_FILE" || true
     log "Codex CLI not available — escalating to Needs Founder"
     add_task_comment "$task_id" "[BLOCKED] Codex CLI not available on this agent. Escalating to Needs Founder. | Agent: $AGENT_ID"
     escalate_task_to_founder "$task_id" "$task_title" "Codex CLI not available on agent $AGENT_ID. Needs manual pickup (Codex CLI or Claude Code CLI)."
-    git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
+    cleanup_worktree "$REPO_PATH" "$WORK_DIR"
     return 0
   fi
 
@@ -1569,7 +1658,7 @@ Model: codex-exec/$CODEX_MODEL" 2>>"$LOG_FILE" || true
       fi
 
       if [[ -n "$llm_output" ]] && apply_diff "$diff_content" "$task_id"; then
-        cd "$REPO_PATH"
+        cd "$WORK_DIR"
         git add -A
         local commit_msg="[builder] Task #$task_id: $task_title
 
@@ -1587,7 +1676,7 @@ Model: $model_used"
   local bad_task_refs=""
 
   if [[ "$execution_success" == "true" ]]; then
-    cd "$REPO_PATH"
+    cd "$WORK_DIR"
 
     # Fix 3: Validate commit messages reference the correct task ID
     # If wrong IDs found, auto-rewrite commits instead of blocking
@@ -1664,7 +1753,7 @@ Model: $model_used"
   if [[ "$execution_success" == "true" ]]; then
     log "Running local CI checks..."
     add_task_comment "$task_id" "[CI] Running local tests..."
-    cd "$REPO_PATH"
+    cd "$WORK_DIR"
 
     local ci_output=""
     if [[ -f "Makefile" ]] && grep -q '^test:' Makefile 2>/dev/null; then
@@ -1705,7 +1794,7 @@ Only output a unified diff to fix the errors. No commentary."
       if [[ "$model_used" == "codex-cli/"* ]] && check_codex_available; then
         local cifix_start cifix_end cifix_exit
         cifix_start=$(date +%s)
-        fix_output=$(_timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$REPO_PATH" \
+        fix_output=$(_timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$WORK_DIR" \
           "Fix the following test failures. Do NOT introduce new features, only fix the failing tests.
 
 $ci_error" 2>&1) || true
@@ -1754,7 +1843,7 @@ $ci_error" 2>&1) || true
 
   # Check if there are commits to push
   local has_commits
-  has_commits=$(git -C "$REPO_PATH" log "origin/main..$branch_name" --oneline 2>/dev/null | wc -l | tr -d ' ')
+  has_commits=$(git -C "$WORK_DIR" log "origin/main..$branch_name" --oneline 2>/dev/null | wc -l | tr -d ' ')
 
   # Fix #5: Don't create PRs when local CI failed — escalate directly instead of
   # creating a broken PR that triggers the PR health check loop
@@ -1762,7 +1851,7 @@ $ci_error" 2>&1) || true
     log "Task #$task_id: $has_commits commit(s) but local CI failed — skipping PR, escalating"
     add_task_comment "$task_id" "[BLOCKED] Code changes made but local CI failed. Escalating instead of creating a broken PR."
     escalate_task_to_founder "$task_id" "$task_title" "Agent produced code changes but local CI fails. Branch: \`$branch_name\` in $REPO_NAME. Model: $model_used, Duration: $duration_str."
-    git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
+    cleanup_worktree "$REPO_PATH" "$WORK_DIR"
     return
   fi
 
@@ -1770,17 +1859,17 @@ $ci_error" 2>&1) || true
     log "Task #$task_id: commit/task mismatch detected ($bad_task_refs) — skipping PR, escalating"
     add_task_comment "$task_id" "[NEEDS FOUNDER] Commit/task mismatch detected ($bad_task_refs). Branch: \`$branch_name\`. PR not created."
     escalate_task_to_founder "$task_id" "$task_title" "Commit messages reference $bad_task_refs instead of Task #$task_id. Branch: \`$branch_name\` in $REPO_NAME. PR creation blocked to prevent cross-task merge."
-    git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
+    cleanup_worktree "$REPO_PATH" "$WORK_DIR"
     return
   fi
 
   if [[ "$has_commits" -gt 0 ]]; then
     log "Task #$task_id: $has_commits commit(s) made, pushing and creating PR"
 
-    git -C "$REPO_PATH" push -u origin "$branch_name" 2>>"$LOG_FILE"
+    git -C "$WORK_DIR" push -u origin "$branch_name" 2>>"$LOG_FILE"
 
     local pr_url
-    pr_url=$(cd "$REPO_PATH" && gh pr create \
+    pr_url=$(cd "$WORK_DIR" && gh pr create \
       --head "$branch_name" \
       --title "[builder] Task #$task_id: $task_title" \
       --body "$(cat <<PRBODY
@@ -1796,7 +1885,7 @@ $task_description
 - Local CI: PASSED
 
 ## Changes
-$(git -C "$REPO_PATH" log origin/main..$branch_name --pretty=format:'- %s' 2>/dev/null)
+$(git -C "$WORK_DIR" log origin/main..$branch_name --pretty=format:'- %s' 2>/dev/null)
 
 ---
 Automated by Axinova Agent Fleet
@@ -1844,8 +1933,8 @@ PRBODY
     escalate_task_to_founder "$task_id" "$task_title" "Agent produced no code changes. Model: $model_used, Duration: $duration_str. May need clearer instructions."
   fi
 
-  # Switch back to main
-  git -C "$REPO_PATH" checkout main 2>>"$LOG_FILE" || true
+  # Clean up the worktree (branch stays on remote after push)
+  cleanup_worktree "$REPO_PATH" "$WORK_DIR"
 }
 
 # --- PR Retry Thresholds ---
@@ -1960,26 +2049,29 @@ check_merged_prs() {
 
 # Checks open PRs for: review comments, CI failures, merge conflicts
 check_pr_health() {
-  # REPO_PATH may not be set if no task has been executed yet this session
-  if [[ -z "${REPO_PATH:-}" ]]; then
-    log "check_pr_health: no REPO_PATH set, skipping"
-    return 0
-  fi
-  cd "$REPO_PATH"
+  # Scan all repos in workspace for this agent's open PRs
+  local repos
+  repos=$(find "$WORKSPACE" -maxdepth 1 -name "axinova-*" -type d 2>/dev/null)
+  [[ -z "$repos" ]] && return 0
+
+  for _pr_repo_dir in $repos; do
+    [[ ! -d "$_pr_repo_dir/.git" ]] && continue
+    # Set REPO_PATH for sub-functions (escalate_to_human, etc.)
+    REPO_PATH="$_pr_repo_dir"
 
   # List open PRs by this agent — gh --head requires exact branch, so filter with jq
   local all_prs prs
-  all_prs=$(gh pr list --state open \
+  all_prs=$(cd "$REPO_PATH" && gh pr list --state open \
     --json number,title,headRefName,url,mergeable \
-    2>/dev/null) || return 0
+    2>/dev/null) || continue
   prs=$(echo "$all_prs" | jq --arg aid "$AGENT_ID" \
-    '[.[] | select(.headRefName | startswith("agent/"+$aid+"/"))]' 2>/dev/null) || return 0
+    '[.[] | select(.headRefName | startswith("agent/"+$aid+"/"))]' 2>/dev/null) || continue
 
   local pr_count
   pr_count=$(echo "$prs" | jq 'length' 2>/dev/null || echo "0")
-  [[ "$pr_count" == "0" ]] && return 0
+  [[ "$pr_count" == "0" ]] && continue
 
-  log "Monitoring $pr_count open PR(s)..."
+  log "Monitoring $pr_count open PR(s) in $(basename "$REPO_PATH")..."
 
   echo "$prs" | jq -c '.[]' | while IFS= read -r pr; do
     local pr_number pr_title pr_branch pr_url mergeable
@@ -2053,14 +2145,16 @@ check_pr_health() {
     _check_review_comments "$pr_number" "$pr_title" "$pr_branch" "$pr_url"
 
   done
+  done  # end repo loop
 }
 
 # --- Fix CI Failures ---
 _fix_ci_failure() {
   local pr_number="$1" pr_title="$2" pr_branch="$3" pr_url="$4" counter_file="$5"
 
-  git fetch origin "$pr_branch" 2>>"$LOG_FILE" || return
-  git checkout "$pr_branch" 2>>"$LOG_FILE" || return
+  local WORK_DIR=""
+  WORK_DIR=$(setup_worktree_existing "$REPO_PATH" "$pr_branch") || { log "Failed to create worktree for PR #$pr_number CI fix"; return; }
+  cd "$WORK_DIR"
 
   # Get the failing check names and logs
   local failed_checks
@@ -2089,7 +2183,7 @@ $(cat "$INSTRUCTIONS_DIR/${ROLE}.md" 2>/dev/null || true)"
     log "Fixing CI with Codex CLI..."
     local prci_start prci_end prci_exit
     prci_start=$(date +%s)
-    if _timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$REPO_PATH" "$fix_prompt" >>"$LOG_FILE" 2>&1; then
+    if _timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$WORK_DIR" "$fix_prompt" >>"$LOG_FILE" 2>&1; then
       prci_exit=0
       prci_end=$(date +%s)
       log_codex_audit "" "pr-ci-fix" "0" "$((prci_end - prci_start))" "$pr_number"
@@ -2161,21 +2255,22 @@ $(cat "$INSTRUCTIONS_DIR/${ROLE}.md" 2>/dev/null || true)"
     log "PR #$pr_number: CI fix attempt failed"
   fi
 
-  git checkout main 2>>"$LOG_FILE" || true
+  cleanup_worktree "$REPO_PATH" "$WORK_DIR"
 }
 
 # --- Resolve Merge Conflicts ---
 _resolve_conflicts() {
   local pr_number="$1" pr_title="$2" pr_branch="$3" pr_url="$4" counter_file="$5"
 
-  git fetch origin main "$pr_branch" 2>>"$LOG_FILE" || return
-  git checkout "$pr_branch" 2>>"$LOG_FILE" || return
+  local WORK_DIR=""
+  WORK_DIR=$(setup_worktree_existing "$REPO_PATH" "$pr_branch") || { log "Failed to create worktree for PR #$pr_number conflict resolution"; return; }
+  cd "$WORK_DIR"
 
   if git rebase origin/main 2>>"$LOG_FILE"; then
     git push --force-with-lease origin "$pr_branch" 2>>"$LOG_FILE" || {
       log "PR #$pr_number: rebase succeeded but push failed"
       increment_counter "$counter_file" > /dev/null
-      git checkout main 2>>"$LOG_FILE" || true
+      cleanup_worktree "$REPO_PATH" "$WORK_DIR"
       return
     }
     log "PR #$pr_number: conflicts resolved via rebase"
@@ -2190,14 +2285,21 @@ _resolve_conflicts() {
     git rebase --abort 2>>"$LOG_FILE" || true
     increment_counter "$counter_file" > /dev/null
 
-    # Try cherry-pick recreation
+    # Try cherry-pick recreation: get commit list, then recreate branch from origin/main
     local pr_commits
     pr_commits=$(git log --reverse --format='%H' "origin/main..ORIG_HEAD" 2>/dev/null)
 
     if [[ -n "$pr_commits" ]]; then
-      git checkout origin/main 2>>"$LOG_FILE" || { git checkout main 2>>"$LOG_FILE" || true; return; }
-      git branch -D "$pr_branch" 2>>"$LOG_FILE" || true
-      git checkout -b "$pr_branch" 2>>"$LOG_FILE" || { git checkout main 2>>"$LOG_FILE" || true; return; }
+      # Remove the worktree so we can delete and recreate the branch
+      cleanup_worktree "$REPO_PATH" "$WORK_DIR"
+      git -C "$REPO_PATH" branch -D "$pr_branch" 2>>"$LOG_FILE" || true
+
+      # Create a fresh worktree from origin/main with the same branch name
+      WORK_DIR=$(setup_worktree "$REPO_PATH" "$pr_branch") || {
+        log "PR #$pr_number: failed to recreate branch for cherry-pick"
+        return
+      }
+      cd "$WORK_DIR"
 
       local cherry_success=true
       while IFS= read -r commit_sha; do
@@ -2209,7 +2311,7 @@ _resolve_conflicts() {
       done <<< "$pr_commits"
 
       if [[ "$cherry_success" == "true" ]]; then
-        git push --force-with-lease origin "$pr_branch" 2>>"$LOG_FILE" || { git checkout main 2>>"$LOG_FILE" || true; return; }
+        git push --force-with-lease origin "$pr_branch" 2>>"$LOG_FILE" || { cleanup_worktree "$REPO_PATH" "$WORK_DIR"; return; }
         log "PR #$pr_number: conflicts resolved via cherry-pick"
         reset_counter "$counter_file"
         notify_discord "${DISCORD_WEBHOOK_LOGS:-}" \
@@ -2224,7 +2326,7 @@ _resolve_conflicts() {
     fi
   fi
 
-  git checkout main 2>>"$LOG_FILE" || true
+  cleanup_worktree "$REPO_PATH" "$WORK_DIR"
 }
 
 # --- Check Review Comments ---
@@ -2269,8 +2371,9 @@ _check_review_comments() {
 
   log "PR #$pr_number has review comment (attempt $((review_attempts + 1))/$MAX_REVIEW_ATTEMPTS): ${comment_body:0:80}..."
 
-  git fetch origin "$pr_branch" 2>>"$LOG_FILE" || return
-  git checkout "$pr_branch" 2>>"$LOG_FILE" || return
+  local WORK_DIR=""
+  WORK_DIR=$(setup_worktree_existing "$REPO_PATH" "$pr_branch") || { log "Failed to create worktree for PR #$pr_number review fix"; return; }
+  cd "$WORK_DIR"
 
   local review_prompt="You are a builder agent. A reviewer left this comment on your PR:
 
@@ -2298,7 +2401,7 @@ $(cat "$INSTRUCTIONS_DIR/${ROLE}.md" 2>/dev/null || true)
     log "Addressing review with Codex CLI..."
     local rev_start rev_end rev_exit
     rev_start=$(date +%s)
-    if _timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$REPO_PATH" "$review_prompt" >>"$LOG_FILE" 2>&1; then
+    if _timeout "$CODEX_TIMEOUT" codex exec --full-auto -C "$WORK_DIR" "$review_prompt" >>"$LOG_FILE" 2>&1; then
       rev_exit=0
       rev_end=$(date +%s)
       log_codex_audit "" "review-fix" "0" "$((rev_end - rev_start))" "$pr_number"
@@ -2361,7 +2464,7 @@ Feedback: ${comment_body:0:100}" 2>>"$LOG_FILE" && review_success=true
   fi
 
   echo "$comment_id" > "$marker_file"
-  git checkout main 2>>"$LOG_FILE" || true
+  cleanup_worktree "$REPO_PATH" "$WORK_DIR"
 }
 
 # --- Main Polling Loop ---
