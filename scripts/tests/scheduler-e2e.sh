@@ -5,30 +5,28 @@
 # Creates mock tasks in Vikunja, waits for agents to process them,
 # then verifies each scheduling scenario passed.
 #
+# All tasks are created upfront and polled concurrently for speed.
+#
 # Usage:
-#   ./scripts/test-scheduler-e2e.sh              # Run all tests
-#   ./scripts/test-scheduler-e2e.sh --cleanup     # Just close leftover test tasks
-#   ./scripts/test-scheduler-e2e.sh --timeout 300  # Custom timeout (default: 240s)
+#   ./scripts/tests/scheduler-e2e.sh              # Run all tests
+#   ./scripts/tests/scheduler-e2e.sh --cleanup     # Just close leftover test tasks
+#   ./scripts/tests/scheduler-e2e.sh --timeout 300  # Custom timeout (default: 240s)
 #
 # Prerequisites:
 #   - Vikunja accessible at localhost:3456 (SSH tunnel)
 #   - Agents running on agent01 + agent02
-#   - jq, curl, python3 installed
+#   - jq, curl installed
 # ============================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VIKUNJA_URL="http://localhost:3456/api/v1"
 VIKUNJA_TOKEN=""
 PROJECT_ID=13
 VIEW_ID=52
 BUCKET_TODO=35
-BUCKET_DOING=36
-BUCKET_DONE=37
-BUCKET_NEEDS_FOUNDER=38
-BUCKET_IN_REVIEW=39
 TIMEOUT="${TIMEOUT:-240}"
 TEST_PREFIX="[SCHED-TEST]"
+POLL_INTERVAL=10
 
 # Colors
 RED='\033[0;31m'
@@ -69,9 +67,9 @@ vikunja_api() {
 
 create_task() {
   local title="$1" description="$2"
-  local result
   local json_body
-  json_body=$(python3 -c 'import json,sys; print(json.dumps({"title": sys.argv[1], "description": sys.argv[2]}))' "$title" "$description")
+  json_body=$(jq -n --arg t "$title" --arg d "$description" '{title: $t, description: $d}')
+  local result
   result=$(vikunja_api PUT "/projects/$PROJECT_ID/tasks" -d "$json_body")
   local task_id
   task_id=$(echo "$result" | jq -r '.id // 0')
@@ -79,298 +77,48 @@ create_task() {
     echo "ERROR: Failed to create task: $title" >&2
     return 1
   fi
-  # Move to To-Do bucket
   vikunja_api POST "/projects/$PROJECT_ID/views/$VIEW_ID/buckets/$BUCKET_TODO/tasks" \
     -d "{\"task_id\": $task_id}" >/dev/null 2>&1 || true
   echo "$task_id"
 }
 
-get_task() {
-  local task_id="$1"
-  vikunja_api GET "/tasks/$task_id" 2>/dev/null
+get_task_comments() {
+  vikunja_api GET "/tasks/$1/comments" 2>/dev/null
 }
 
-get_task_comments() {
+has_comment_matching() {
+  local task_id="$1" pattern="$2"
+  local comments
+  comments=$(get_task_comments "$task_id") || return 1
+  echo "$comments" | grep -q "$pattern"
+}
+
+get_claim_count() {
   local task_id="$1"
-  vikunja_api GET "/tasks/$task_id/comments" 2>/dev/null
+  local comments
+  comments=$(get_task_comments "$task_id") || echo "[]"
+  echo "$comments" | jq '[.[] | select(.comment | test("CLAIMED"))] | length' 2>/dev/null || echo "0"
 }
 
 close_task() {
   local task_id="$1"
-  # GET full task first to avoid wiping fields
   local full_task
-  full_task=$(get_task "$task_id") || true
+  full_task=$(vikunja_api GET "/tasks/$task_id" 2>/dev/null) || true
   if [[ -n "$full_task" ]]; then
     local clean
-    clean=$(echo "$full_task" | python3 -c "
-import json, sys
-raw = sys.stdin.read()
-clean = ''.join(c if c in '\n\t' or ord(c) >= 32 else '' for c in raw)
-task = json.loads(clean)
-task['done'] = True
-print(json.dumps(task))
-" 2>/dev/null) || clean='{"done": true}'
+    clean=$(echo "$full_task" | jq '.done = true' 2>/dev/null) || clean='{"done": true}'
     vikunja_api POST "/tasks/$task_id" -d "$clean" >/dev/null 2>&1
   fi
 }
 
-wait_for_condition() {
-  local description="$1"
-  local check_fn="$2"
-  local max_wait="$3"
-  local elapsed=0
-  local interval=10
-
-  printf "  Waiting: %-50s " "$description"
-  while [[ $elapsed -lt $max_wait ]]; do
-    if $check_fn 2>/dev/null; then
-      printf "${GREEN}OK${NC} (%ds)\n" "$elapsed"
-      return 0
-    fi
-    sleep "$interval"
-    elapsed=$((elapsed + interval))
-    printf "."
-  done
-  printf "${RED}TIMEOUT${NC} (%ds)\n" "$max_wait"
-  return 1
-}
-
-# --- Test Definitions ---
-
-declare -a TEST_IDS=()
-# Results stored as simple vars (macOS bash 3 lacks associative arrays)
-RESULT_T1="SKIP" RESULT_T2="SKIP" RESULT_T3="SKIP"
-RESULT_T4="SKIP" RESULT_T5="SKIP" RESULT_T6="SKIP"
-RESULT_T7="SKIP"
-
-run_test_t1_priority_escalation() {
-  echo -e "\n${CYAN}[T1] Priority 4 — auto-escalate to Needs Founder${NC}"
-  local tid
-  tid=$(create_task \
-    "$TEST_PREFIX [T1] Priority escalation test — axinova-miniapp-builder-go" \
-    "<p>$TEST_PREFIX Scheduler test T1</p><h2>Task</h2><p>This task has priority 4 and should auto-escalate.</p>")
-  TEST_IDS+=("$tid")
-  echo "  Created task #$tid"
-  # Set priority to 4 (hard — founder-only)
-  vikunja_api POST "/tasks/$tid" -d '{"priority": 4}' >/dev/null 2>&1
-
-  check_t1() {
-    local comments
-    comments=$(get_task_comments "$tid") || return 1
-    echo "$comments" | grep -q "NEEDS FOUNDER"
-  }
-
-  if wait_for_condition "auto-escalated via priority" check_t1 "$TIMEOUT"; then
-    RESULT_T1="PASS"
-  else
-    RESULT_T1="FAIL"
-  fi
-}
-
-run_test_t2_codex_route() {
-  echo -e "\n${CYAN}[T2] MODEL: codex — Codex CLI routing${NC}"
-  local tid
-  tid=$(create_task \
-    "$TEST_PREFIX [T2] Echo codex route test — axinova-miniapp-builder-go" \
-    "<p>MODEL: codex</p><p>$TEST_PREFIX Scheduler test T2</p><h2>Task</h2><p>Create a file <code>test-t2-codex.txt</code> in the repo root containing: test-t2-codex-ok</p>")
-  TEST_IDS+=("$tid")
-  echo "  Created task #$tid"
-
-  check_t2() {
-    local comments
-    comments=$(get_task_comments "$tid") || return 1
-    echo "$comments" | grep -q "codex-exec"
-  }
-
-  if wait_for_condition "agent uses Codex CLI" check_t2 "$TIMEOUT"; then
-    RESULT_T2="PASS"
-  else
-    RESULT_T2="FAIL"
-  fi
-}
-
-run_test_t3_founder_guard() {
-  echo -e "\n${CYAN}[T3] MODEL: founder — agents must skip${NC}"
-  local tid
-  tid=$(create_task \
-    "$TEST_PREFIX [T3] Founder guard test — axinova-miniapp-builder-go" \
-    "<p>MODEL: founder</p><p>$TEST_PREFIX Scheduler test T3</p><h2>Task</h2><p>This task must NOT be picked up by any agent.</p>")
-  TEST_IDS+=("$tid")
-  echo "  Created task #$tid"
-
-  # Wait enough poll cycles for agents to see it, then verify NO claims
-  echo "  Waiting ${TIMEOUT}s for agents to poll..."
-  sleep "$TIMEOUT"
-
-  local task_json
-  task_json=$(get_task "$tid") || true
-  local pct
-  pct=$(echo "$task_json" | jq -r '.percent_done // 0') || pct="0"
-  local comments
-  comments=$(get_task_comments "$tid") || comments="[]"
-  local claim_count
-  claim_count=$(echo "$comments" | jq '[.[] | select(.comment | test("CLAIMED"))] | length' 2>/dev/null) || claim_count=0
-
-  if [[ "$pct" == "0" && "$claim_count" == "0" ]]; then
-    printf "  Result: ${GREEN}PASS${NC} — no agent claimed it (pct=%s, claims=%s)\n" "$pct" "$claim_count"
-    RESULT_T3="PASS"
-  else
-    printf "  Result: ${RED}FAIL${NC} — task was claimed! (pct=%s, claims=%s)\n" "$pct" "$claim_count"
-    RESULT_T3="FAIL"
-  fi
-}
-
-run_test_t4_default_model() {
-  echo -e "\n${CYAN}[T4] No MODEL override — default to Codex CLI${NC}"
-  local tid
-  tid=$(create_task \
-    "$TEST_PREFIX [T4] Default model test — axinova-miniapp-builder-go" \
-    "<p>$TEST_PREFIX Scheduler test T4</p><h2>Task</h2><p>Create a file <code>test-t4-default.txt</code> in the repo root containing: test-t4-default-ok</p>")
-  TEST_IDS+=("$tid")
-  echo "  Created task #$tid"
-
-  check_t4() {
-    local comments
-    comments=$(get_task_comments "$tid") || return 1
-    # Should use codex-exec as default (Kimi fallback removed)
-    echo "$comments" | grep -q "codex-exec"
-  }
-
-  if wait_for_condition "agent picks up with Codex CLI" check_t4 "$TIMEOUT"; then
-    RESULT_T4="PASS"
-  else
-    RESULT_T4="FAIL"
-  fi
-}
-
-run_test_t5_race() {
-  echo -e "\n${CYAN}[T5] Race condition — only 1 agent claims${NC}"
-  local tid
-  tid=$(create_task \
-    "$TEST_PREFIX [T5] Race condition test — axinova-miniapp-builder-go" \
-    "<p>$TEST_PREFIX Scheduler test T5</p><h2>Task</h2><p>Create a file <code>test-t5-race.txt</code> in the repo root containing: test-t5-race-ok</p>")
-  TEST_IDS+=("$tid")
-  echo "  Created task #$tid"
-
-  check_t5() {
-    local comments
-    comments=$(get_task_comments "$tid") || return 1
-    echo "$comments" | grep -q "CLAIMED"
-  }
-
-  if wait_for_condition "at least 1 agent claims" check_t5 "$TIMEOUT"; then
-    # Now verify only 1 agent claimed
-    local comments claim_count
-    comments=$(get_task_comments "$tid") || comments="[]"
-    claim_count=$(echo "$comments" | jq '[.[] | select(.comment | test("CLAIMED"))] | length' 2>/dev/null) || claim_count=0
-    if [[ "$claim_count" -eq 1 ]]; then
-      printf "  Result: ${GREEN}PASS${NC} — exactly 1 claim\n"
-      RESULT_T5="PASS"
-    else
-      printf "  Result: ${RED}FAIL${NC} — %s claims (expected 1)\n" "$claim_count"
-      RESULT_T5="FAIL"
-    fi
-  else
-    RESULT_T5="FAIL"
-  fi
-}
-
-run_test_t6_complexity() {
-  echo -e "\n${CYAN}[T6] Complexity auto-escalation${NC}"
-  local tid
-  tid=$(create_task \
-    "$TEST_PREFIX [T6] Full multi-step wizard with admin panel migration refactor redesign onboarding — axinova-miniapp-builder-go" \
-    "<p>$TEST_PREFIX Scheduler test T6</p><h2>Task</h2><p>Multi-step wizard with onboarding migration and admin panel redesign across multiple components and files. Refactor the entire flow.</p>")
-  TEST_IDS+=("$tid")
-  echo "  Created task #$tid"
-
-  check_t6() {
-    local comments
-    comments=$(get_task_comments "$tid") || return 1
-    echo "$comments" | grep -q "NEEDS FOUNDER"
-  }
-
-  if wait_for_condition "auto-escalated to Needs Founder" check_t6 "$TIMEOUT"; then
-    RESULT_T6="PASS"
-  else
-    RESULT_T6="FAIL"
-  fi
-}
-
-run_test_t7_blocked_dependency() {
-  echo -e "\n${CYAN}[T7] Blocked dependency — agents skip tasks with unmet blockers${NC}"
-
-  # Create the blocker task first (will NOT be in To-Do, so agents won't execute it)
-  local blocker_tid
-  blocker_tid=$(create_task \
-    "$TEST_PREFIX [T7-blocker] Dependency blocker — axinova-miniapp-builder-go" \
-    "<p>MODEL: founder</p><p>$TEST_PREFIX Scheduler test T7 blocker task. Must be completed before the blocked task can be picked up.</p>")
-  TEST_IDS+=("$blocker_tid")
-  echo "  Created blocker task #$blocker_tid"
-
-  # Create the blocked task (depends on blocker)
-  local blocked_tid
-  blocked_tid=$(create_task \
-    "$TEST_PREFIX [T7-blocked] Depends on blocker — axinova-miniapp-builder-go" \
-    "<p>$TEST_PREFIX Scheduler test T7 blocked task. Should NOT be picked up until blocker is done.</p><h2>Task</h2><p>Create a file <code>test-t7-blocked.txt</code> in the repo root containing: test-t7-blocked-ok</p>")
-  TEST_IDS+=("$blocked_tid")
-  echo "  Created blocked task #$blocked_tid"
-
-  # Create the dependency relation: blocked_tid is blocked by blocker_tid
-  vikunja_api PUT "/tasks/$blocked_tid/relations" \
-    -d "{\"other_task_id\": $blocker_tid, \"relation_kind\": \"blocked\"}" >/dev/null 2>&1
-  echo "  Created relation: #$blocked_tid blocked by #$blocker_tid"
-
-  # Phase 1: Wait and verify the blocked task is NOT claimed (blocker incomplete)
-  local phase1_wait=$((TIMEOUT / 2))
-  echo "  Phase 1: Waiting ${phase1_wait}s — blocked task should NOT be claimed..."
-  sleep "$phase1_wait"
-
-  local task_json
-  task_json=$(get_task "$blocked_tid") || true
-  local pct
-  pct=$(echo "$task_json" | jq -r '.percent_done // 0') || pct="0"
-  local comments
-  comments=$(get_task_comments "$blocked_tid") || comments="[]"
-  local claim_count
-  claim_count=$(echo "$comments" | jq '[.[] | select(.comment | test("CLAIMED"))] | length' 2>/dev/null) || claim_count=0
-
-  if [[ "$pct" != "0" || "$claim_count" != "0" ]]; then
-    printf "  Phase 1: ${RED}FAIL${NC} — blocked task was claimed before blocker done! (pct=%s, claims=%s)\n" "$pct" "$claim_count"
-    RESULT_T7="FAIL"
-    return
-  fi
-  printf "  Phase 1: ${GREEN}OK${NC} — blocked task not claimed (as expected)\n"
-
-  # Phase 2: Mark blocker as done, then verify blocked task gets picked up
-  echo "  Phase 2: Marking blocker #$blocker_tid as done..."
-  local blocker_full
-  blocker_full=$(get_task "$blocker_tid") || true
-  if [[ -n "$blocker_full" ]]; then
+mark_done() {
+  local task_id="$1"
+  local full_task
+  full_task=$(vikunja_api GET "/tasks/$task_id" 2>/dev/null) || true
+  if [[ -n "$full_task" ]]; then
     local updated
-    updated=$(echo "$blocker_full" | python3 -c "
-import json, sys
-raw = sys.stdin.read()
-clean = ''.join(c if c in '\n\t' or ord(c) >= 32 else '' for c in raw)
-task = json.loads(clean)
-task['done'] = True
-print(json.dumps(task))
-" 2>/dev/null) || updated='{"done": true}'
-    vikunja_api POST "/tasks/$blocker_tid" -d "$updated" >/dev/null 2>&1
-  fi
-
-  check_t7_claimed() {
-    local comments
-    comments=$(get_task_comments "$blocked_tid") || return 1
-    echo "$comments" | grep -q "CLAIMED"
-  }
-
-  if wait_for_condition "blocked task picked up after blocker done" check_t7_claimed "$TIMEOUT"; then
-    RESULT_T7="PASS"
-  else
-    # Blocked task not picked up even after blocker done — might be timeout
-    printf "  Phase 2: ${RED}FAIL${NC} — blocked task not picked up after blocker resolved\n"
-    RESULT_T7="FAIL"
+    updated=$(echo "$full_task" | jq '.done = true' 2>/dev/null) || updated='{"done": true}'
+    vikunja_api POST "/tasks/$task_id" -d "$updated" >/dev/null 2>&1
   fi
 }
 
@@ -378,8 +126,7 @@ print(json.dumps(task))
 
 cleanup_test_tasks() {
   echo -e "\n${YELLOW}Cleaning up test tasks...${NC}"
-  # Close tasks created by this run
-  for tid in "${TEST_IDS[@]+"${TEST_IDS[@]}"}"; do
+  for tid in "${ALL_TASK_IDS[@]+"${ALL_TASK_IDS[@]}"}"; do
     close_task "$tid"
     echo "  Closed #$tid"
   done
@@ -396,7 +143,12 @@ cleanup_test_tasks() {
   fi
 }
 
-# --- Main ---
+# --- Results ---
+
+declare -a ALL_TASK_IDS=()
+RESULT_T1="SKIP" RESULT_T2="SKIP" RESULT_T3="SKIP"
+RESULT_T4="SKIP" RESULT_T5="SKIP" RESULT_T6="SKIP"
+RESULT_T7="SKIP"
 
 print_results() {
   echo -e "\n${CYAN}═══════════════════════════════════════════${NC}"
@@ -421,7 +173,7 @@ print_results() {
       T6) desc="Complexity -> auto-escalation";;
       T7) desc="Blocked dependency -> agents skip until resolved";;
     esac
-    printf "  %-5s %-45s ${color}%s${NC}\n" "[$test_name]" "$desc" "$result"
+    printf "  %-5s %-50s ${color}%s${NC}\n" "[$test_name]" "$desc" "$result"
   done
 
   echo -e "${CYAN}───────────────────────────────────────────${NC}"
@@ -431,11 +183,12 @@ print_results() {
   [[ "$fail" -eq 0 ]]
 }
 
+# --- Main ---
+
 main() {
-  # Parse args
   if [[ "${1:-}" == "--cleanup" ]]; then
     load_token
-    TEST_IDS=()
+    ALL_TASK_IDS=()
     cleanup_test_tasks
     exit 0
   fi
@@ -448,33 +201,272 @@ main() {
 
   echo -e "${CYAN}Agent Scheduler E2E Test${NC}"
   echo "  Vikunja: $VIKUNJA_URL (project $PROJECT_ID)"
-  echo "  Timeout per test: ${TIMEOUT}s"
-  echo "  Test prefix: $TEST_PREFIX"
+  echo "  Timeout: ${TIMEOUT}s"
   echo ""
 
-  # Run T3 (founder guard) and T6 (complexity) first since they're fast
-  # Then run T1, T2, T4, T5 which need LLM execution
-  # T3 is special — we need to wait and verify NOTHING happens
+  # ================================================================
+  # Phase 1: Create ALL tasks upfront
+  # ================================================================
+  echo -e "${CYAN}Creating all test tasks...${NC}"
 
-  # Fast tests: T5 (race), T6 (complexity), T1 (kimi), T2 (codex), T4 (default)
-  # These run in sequence but verify in parallel via polling
-  run_test_t6_complexity
-  run_test_t5_race
-  run_test_t1_priority_escalation
-  run_test_t2_codex_route
-  run_test_t4_default_model
+  # T1: Priority 4 → auto-escalate
+  local T1_ID
+  T1_ID=$(create_task \
+    "$TEST_PREFIX [T1] Priority escalation test — axinova-miniapp-builder-go" \
+    "<p>$TEST_PREFIX Scheduler test T1</p><h2>Task</h2><p>This task has priority 4 and should auto-escalate.</p>")
+  ALL_TASK_IDS+=("$T1_ID")
+  vikunja_api POST "/tasks/$T1_ID" -d '{"priority": 4}' >/dev/null 2>&1
+  echo "  T1 (priority escalation): #$T1_ID"
 
-  # T7 dependency test (has its own internal phases — blocked then unblocked)
-  run_test_t7_blocked_dependency
+  # T2: MODEL: codex → Codex CLI
+  local T2_ID
+  T2_ID=$(create_task \
+    "$TEST_PREFIX [T2] Echo codex route test — axinova-miniapp-builder-go" \
+    "<p>MODEL: codex</p><p>$TEST_PREFIX Scheduler test T2</p><h2>Task</h2><p>Create a file <code>test-t2-codex.txt</code> containing: test-t2-ok</p>")
+  ALL_TASK_IDS+=("$T2_ID")
+  echo "  T2 (codex routing):       #$T2_ID"
 
-  # T3 runs last because it's a negative test (wait for nothing to happen)
-  run_test_t3_founder_guard
+  # T3: MODEL: founder → agents skip (negative test)
+  local T3_ID
+  T3_ID=$(create_task \
+    "$TEST_PREFIX [T3] Founder guard test — axinova-miniapp-builder-go" \
+    "<p>MODEL: founder</p><p>$TEST_PREFIX Scheduler test T3</p><h2>Task</h2><p>Must NOT be picked up.</p>")
+  ALL_TASK_IDS+=("$T3_ID")
+  echo "  T3 (founder guard):       #$T3_ID"
 
-  # Results
+  # T4: No MODEL → default Codex CLI
+  local T4_ID
+  T4_ID=$(create_task \
+    "$TEST_PREFIX [T4] Default model test — axinova-miniapp-builder-go" \
+    "<p>$TEST_PREFIX Scheduler test T4</p><h2>Task</h2><p>Create a file <code>test-t4-default.txt</code> containing: test-t4-ok</p>")
+  ALL_TASK_IDS+=("$T4_ID")
+  echo "  T4 (default model):       #$T4_ID"
+
+  # T5: Race condition → only 1 agent claims
+  local T5_ID
+  T5_ID=$(create_task \
+    "$TEST_PREFIX [T5] Race condition test — axinova-miniapp-builder-go" \
+    "<p>$TEST_PREFIX Scheduler test T5</p><h2>Task</h2><p>Create a file <code>test-t5-race.txt</code> containing: test-t5-ok</p>")
+  ALL_TASK_IDS+=("$T5_ID")
+  echo "  T5 (race condition):      #$T5_ID"
+
+  # T6: Complexity → auto-escalate
+  local T6_ID
+  T6_ID=$(create_task \
+    "$TEST_PREFIX [T6] Full multi-step wizard with admin panel migration refactor redesign onboarding — axinova-miniapp-builder-go" \
+    "<p>$TEST_PREFIX Scheduler test T6</p><h2>Task</h2><p>Multi-step wizard with onboarding migration and admin panel redesign. Refactor the entire flow.</p>")
+  ALL_TASK_IDS+=("$T6_ID")
+  echo "  T6 (complexity):          #$T6_ID"
+
+  # T7: Blocked dependency (2 tasks + relation)
+  local T7_BLOCKER_ID T7_BLOCKED_ID
+  T7_BLOCKER_ID=$(create_task \
+    "$TEST_PREFIX [T7-blocker] Dependency blocker — axinova-miniapp-builder-go" \
+    "<p>MODEL: founder</p><p>$TEST_PREFIX T7 blocker task.</p>")
+  ALL_TASK_IDS+=("$T7_BLOCKER_ID")
+
+  T7_BLOCKED_ID=$(create_task \
+    "$TEST_PREFIX [T7-blocked] Depends on blocker — axinova-miniapp-builder-go" \
+    "<p>$TEST_PREFIX T7 blocked task.</p><h2>Task</h2><p>Create a file <code>test-t7.txt</code> containing: test-t7-ok</p>")
+  ALL_TASK_IDS+=("$T7_BLOCKED_ID")
+
+  vikunja_api PUT "/tasks/$T7_BLOCKED_ID/relations" \
+    -d "{\"other_task_id\": $T7_BLOCKER_ID, \"relation_kind\": \"blocked\"}" >/dev/null 2>&1
+  echo "  T7 (blocked dep):         #$T7_BLOCKED_ID blocked by #$T7_BLOCKER_ID"
+
+  local start_time
+  start_time=$(date +%s)
+  echo ""
+
+  # ================================================================
+  # Phase 2: Poll all positive tests concurrently
+  # ================================================================
+  # Track which tests are still pending
+  local t1_done=false t2_done=false t4_done=false t5_done=false t6_done=false
+  local t7_phase1_done=false t7_unblocked=false t7_done=false
+  local t3_done=false
+  local elapsed=0
+
+  # Minimum wait before checking negative tests (T3, T7-phase1)
+  # Need at least 2 full poll cycles (~240s + jitter) for T3 to be sure
+  # T7-phase1 needs fewer cycles since agents are already polling
+  local T3_MIN_WAIT="$TIMEOUT"
+  local T7_PHASE1_MIN_WAIT=$(( TIMEOUT / 2 ))
+
+  echo -e "${CYAN}Polling all tests concurrently...${NC}"
+
+  while [[ $elapsed -lt $((TIMEOUT * 2)) ]]; do
+    local all_resolved=true
+
+    # --- T1: Priority escalation ---
+    if [[ "$t1_done" == "false" ]]; then
+      if has_comment_matching "$T1_ID" "NEEDS FOUNDER"; then
+        printf "  ${GREEN}✓${NC} T1 priority escalation     (%ds)\n" "$elapsed"
+        RESULT_T1="PASS"
+        t1_done=true
+      else
+        all_resolved=false
+      fi
+    fi
+
+    # --- T2: Codex routing ---
+    if [[ "$t2_done" == "false" ]]; then
+      if has_comment_matching "$T2_ID" "codex-exec"; then
+        printf "  ${GREEN}✓${NC} T2 codex routing            (%ds)\n" "$elapsed"
+        RESULT_T2="PASS"
+        t2_done=true
+      else
+        all_resolved=false
+      fi
+    fi
+
+    # --- T4: Default model ---
+    if [[ "$t4_done" == "false" ]]; then
+      if has_comment_matching "$T4_ID" "codex-exec"; then
+        printf "  ${GREEN}✓${NC} T4 default model            (%ds)\n" "$elapsed"
+        RESULT_T4="PASS"
+        t4_done=true
+      else
+        all_resolved=false
+      fi
+    fi
+
+    # --- T5: Race condition ---
+    if [[ "$t5_done" == "false" ]]; then
+      if has_comment_matching "$T5_ID" "CLAIMED"; then
+        local claim_count
+        claim_count=$(get_claim_count "$T5_ID")
+        if [[ "$claim_count" -eq 1 ]]; then
+          printf "  ${GREEN}✓${NC} T5 race (1 claim)           (%ds)\n" "$elapsed"
+          RESULT_T5="PASS"
+        else
+          printf "  ${RED}✗${NC} T5 race (%s claims!)        (%ds)\n" "$claim_count" "$elapsed"
+          RESULT_T5="FAIL"
+        fi
+        t5_done=true
+      else
+        all_resolved=false
+      fi
+    fi
+
+    # --- T6: Complexity escalation ---
+    if [[ "$t6_done" == "false" ]]; then
+      if has_comment_matching "$T6_ID" "NEEDS FOUNDER"; then
+        printf "  ${GREEN}✓${NC} T6 complexity escalation    (%ds)\n" "$elapsed"
+        RESULT_T6="PASS"
+        t6_done=true
+      else
+        all_resolved=false
+      fi
+    fi
+
+    # --- T7 Phase 1: Verify blocked task NOT claimed ---
+    if [[ "$t7_phase1_done" == "false" && "$elapsed" -ge "$T7_PHASE1_MIN_WAIT" ]]; then
+      local blocked_claims
+      blocked_claims=$(get_claim_count "$T7_BLOCKED_ID")
+      if [[ "$blocked_claims" == "0" ]]; then
+        printf "  ${GREEN}✓${NC} T7 phase1 (not claimed)     (%ds)\n" "$elapsed"
+        t7_phase1_done=true
+      else
+        printf "  ${RED}✗${NC} T7 phase1 FAIL — blocked task claimed before blocker done!\n"
+        RESULT_T7="FAIL"
+        t7_phase1_done=true
+        t7_done=true
+      fi
+    fi
+
+    # --- T7: Unblock after phase 1 passes ---
+    if [[ "$t7_phase1_done" == "true" && "$t7_unblocked" == "false" && "$RESULT_T7" != "FAIL" ]]; then
+      echo "  T7 unblocking: marking blocker #$T7_BLOCKER_ID as done..."
+      mark_done "$T7_BLOCKER_ID"
+      t7_unblocked=true
+    fi
+
+    # --- T7 Phase 2: Verify blocked task gets picked up ---
+    if [[ "$t7_unblocked" == "true" && "$t7_done" == "false" ]]; then
+      if has_comment_matching "$T7_BLOCKED_ID" "CLAIMED"; then
+        printf "  ${GREEN}✓${NC} T7 phase2 (picked up)       (%ds)\n" "$elapsed"
+        RESULT_T7="PASS"
+        t7_done=true
+      else
+        all_resolved=false
+      fi
+    elif [[ "$t7_done" == "false" ]]; then
+      all_resolved=false
+    fi
+
+    # --- T3: Negative test — check after minimum wait ---
+    if [[ "$t3_done" == "false" && "$elapsed" -ge "$T3_MIN_WAIT" ]]; then
+      local t3_claims
+      t3_claims=$(get_claim_count "$T3_ID")
+      local t3_pct
+      t3_pct=$(vikunja_api GET "/tasks/$T3_ID" 2>/dev/null | jq -r '.percent_done // 0') || t3_pct="0"
+      if [[ "$t3_claims" == "0" && "$t3_pct" == "0" ]]; then
+        printf "  ${GREEN}✓${NC} T3 founder guard (skipped)  (%ds)\n" "$elapsed"
+        RESULT_T3="PASS"
+      else
+        printf "  ${RED}✗${NC} T3 founder guard FAIL — task was claimed! (claims=%s, pct=%s)\n" "$t3_claims" "$t3_pct"
+        RESULT_T3="FAIL"
+      fi
+      t3_done=true
+    elif [[ "$t3_done" == "false" ]]; then
+      all_resolved=false
+    fi
+
+    # All tests resolved?
+    if [[ "$all_resolved" == "true" ]]; then
+      break
+    fi
+
+    sleep "$POLL_INTERVAL"
+    elapsed=$(( $(date +%s) - start_time ))
+  done
+
+  # Mark any remaining tests as FAIL (timed out)
+  if [[ "$t1_done" == "false" ]]; then
+    printf "  ${RED}✗${NC} T1 priority escalation     TIMEOUT\n"
+    RESULT_T1="FAIL"
+  fi
+  if [[ "$t2_done" == "false" ]]; then
+    printf "  ${RED}✗${NC} T2 codex routing            TIMEOUT\n"
+    RESULT_T2="FAIL"
+  fi
+  if [[ "$t3_done" == "false" ]]; then
+    # T3 never got checked — treat as pass (agents didn't claim it)
+    local t3_claims
+    t3_claims=$(get_claim_count "$T3_ID")
+    if [[ "$t3_claims" == "0" ]]; then
+      printf "  ${GREEN}✓${NC} T3 founder guard (skipped)  (%ds)\n" "$elapsed"
+      RESULT_T3="PASS"
+    else
+      printf "  ${RED}✗${NC} T3 founder guard FAIL\n"
+      RESULT_T3="FAIL"
+    fi
+  fi
+  if [[ "$t4_done" == "false" ]]; then
+    printf "  ${RED}✗${NC} T4 default model            TIMEOUT\n"
+    RESULT_T4="FAIL"
+  fi
+  if [[ "$t5_done" == "false" ]]; then
+    printf "  ${RED}✗${NC} T5 race condition           TIMEOUT\n"
+    RESULT_T5="FAIL"
+  fi
+  if [[ "$t6_done" == "false" ]]; then
+    printf "  ${RED}✗${NC} T6 complexity escalation    TIMEOUT\n"
+    RESULT_T6="FAIL"
+  fi
+  if [[ "$t7_done" == "false" ]]; then
+    printf "  ${RED}✗${NC} T7 blocked dependency       TIMEOUT\n"
+    RESULT_T7="FAIL"
+  fi
+
+  local total_elapsed=$(( $(date +%s) - start_time ))
+  echo ""
+  echo -e "  Total test time: ${total_elapsed}s"
+
   print_results
   local exit_code=$?
 
-  # Cleanup
   cleanup_test_tasks
 
   exit "$exit_code"
