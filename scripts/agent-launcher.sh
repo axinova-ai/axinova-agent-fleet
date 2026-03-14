@@ -1523,6 +1523,7 @@ execute_task() {
     add_task_comment "$task_id" "[BLOCKED] MODEL: founder — reserved for manual work. Returning to To-Do. | Agent: $AGENT_ID"
     update_vikunja_task "$task_id" '{"percent_done": 0}'
     move_to_bucket "$task_id" "$BUCKET_TODO"
+    cleanup_worktree "$REPO_PATH" "$WORK_DIR"
     return 0
   fi
 
@@ -2567,6 +2568,33 @@ while true; do
   if (( _loop_count % PR_HEALTH_INTERVAL == 0 )); then
     log "Running PR health check (loop #$_loop_count)..."
     check_pr_health
+  fi
+
+  # Prune stale worktrees every 10 loops (~20 min). Handles crash/kill scenarios
+  # where cleanup_worktree never ran. Only one builder per machine does this.
+  if [[ "$AGENT_ID" == "builder-1" || "$AGENT_ID" == "builder-11" ]] && (( _loop_count % 10 == 0 )); then
+    if [[ -d "$WORKTREE_BASE" ]]; then
+      _stale_count=0
+      for _wt_repo_dir in "$WORKTREE_BASE"/*/; do
+        [ -d "$_wt_repo_dir" ] || continue
+        _base_repo="$WORKSPACE/$(basename "$_wt_repo_dir")"
+        [ -d "$_base_repo/.git" ] || continue
+        # git worktree prune removes entries whose directories no longer exist
+        git -C "$_base_repo" worktree prune 2>>"$LOG_FILE" || true
+        # Remove worktree dirs that have been sitting idle for >2 hours (stale from crashes)
+        for _wt_dir in "$_wt_repo_dir"*/; do
+          [ -d "$_wt_dir" ] || continue
+          # Check if the worktree dir was last modified >2 hours ago
+          _age_min=$(( ( $(date +%s) - $(stat -f%m "$_wt_dir" 2>/dev/null || echo "0") ) / 60 ))
+          if [[ "$_age_min" -gt 120 ]]; then
+            log "Pruning stale worktree (${_age_min}min old): $_wt_dir"
+            git -C "$_base_repo" worktree remove --force "$_wt_dir" 2>>"$LOG_FILE" || rm -rf "$_wt_dir"
+            _stale_count=$((_stale_count + 1))
+          fi
+        done
+      done
+      [[ "$_stale_count" -gt 0 ]] && log "Pruned $_stale_count stale worktree(s)"
+    fi
   fi
 
   # Add jitter (0-15s) to prevent all builders polling at the exact same moment
