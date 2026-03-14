@@ -637,6 +637,7 @@ setup_worktree() {
     log "Worktree created: $worktree_dir (branch: $branch_name)" >&2
   else
     log "ERROR: Failed to create worktree for $branch_name" >&2
+    echo ""
     return 1
   fi
 
@@ -668,6 +669,7 @@ setup_worktree_existing() {
     log "Worktree created (existing branch): $worktree_dir (branch: $branch_name)" >&2
   else
     log "ERROR: Failed to create worktree for existing branch $branch_name" >&2
+    echo ""
     return 1
   fi
 
@@ -1915,7 +1917,7 @@ PRBODY
         --arg desc "$existing_desc" \
         --arg note "$pr_note" \
         '{percent_done: 0.8, description: ($desc + "\n\n--- Result ---\n" + $note)}')
-      vikunja_api POST "/tasks/${task_id}" "$merged_payload" >>"$LOG_FILE" 2>&1 || true
+      vikunja_api POST "/tasks/${task_id}" -d "$merged_payload" >>"$LOG_FILE" 2>&1 || true
       add_task_comment "$task_id" "[IN REVIEW] PR: $pr_url | Model: $model_used | Duration: $duration_str | Commits: $has_commits | CI: PASSED"
 
       # Notify Discord #agent-prs with rich embed
@@ -2420,20 +2422,6 @@ Feedback: ${comment_body:0:100}" 2>>"$LOG_FILE" || true
       rev_end=$(date +%s)
       log_codex_audit "" "review-fix" "$rev_exit" "$((rev_end - rev_start))" "$pr_number"
       log "Codex review fix failed (exit $rev_exit, $((rev_end - rev_start))s)"
-    fi
-  elif [[ -n "${MOONSHOT_API_KEY:-}" ]]; then
-    log "Addressing review with Kimi K2.5..."
-    local review_output
-    review_output=$(call_kimi_api "$review_prompt") || true
-    if [[ -n "$review_output" ]]; then
-      local review_diff
-      review_diff=$(extract_diff "$review_output")
-      if apply_diff "$review_diff" "0"; then
-        git add -A
-        git commit -m "[$ROLE] Address review feedback on PR #$pr_number
-
-Feedback: ${comment_body:0:100}" 2>>"$LOG_FILE" && review_success=true
-      fi
     fi
   fi
 
