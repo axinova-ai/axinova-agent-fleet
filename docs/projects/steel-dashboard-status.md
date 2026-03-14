@@ -2,21 +2,21 @@
 
 **Vikunja Project:** trader-ag (ID 29)
 **Repos:** axinova-trading-agent-go, axinova-trading-agent-web
-**Last updated:** 2026-03-13 (evening)
+**Last updated:** 2026-03-14
 
 ## Summary
 
 | Wave | Total | Done | In Review | To-Do | Blocked |
 |------|-------|------|-----------|-------|---------|
 | 1    | 5     | 5    | 0         | 0     | 0       |
-| 2    | 6     | 4    | 2         | 0     | 0       |
+| 2    | 6     | 5    | 0         | 1     | 0       |
 | 3    | 6     | 0    | 0         | 6     | gated   |
 | 4    | 6     | 0    | 0         | 6     | gated   |
 | 5    | 8     | 0    | 0         | 8     | gated   |
 | 6    | 2     | 0    | 0         | 2     | gated   |
 | 7    | 1     | 0    | 0         | 1     | gated   |
 | 8    | 1     | 0    | 0         | 1     | gated   |
-| **Total** | **35** | **9** | **2** | **24** | |
+| **Total** | **35** | **11** | **0** | **24** | |
 
 ## Wave 1 — Foundation (COMPLETE)
 
@@ -28,16 +28,16 @@
 | T-13 (#236) | Add steel config section to Koanf | Done | go#31 merged | codex-exec/gpt-5.4 |
 | T-22 (#232) | Add steel i18n messages (en + zh) | Done | web#40 merged | codex-exec/gpt-5.4 |
 
-## Wave 2 — Data Layer + Adapter Endpoints (2 PRs pending merge)
+## Wave 2 — Data Layer + Adapter Endpoints (5/6 done, 1 waiting for agent)
 
 | Task | Title | Status | PR | Model | Notes |
 |------|-------|--------|----|-------|-------|
 | T-05 (#239) | Implement adapter quotes endpoint | Done | go#32 merged | codex-exec/gpt-5.4 | Also implemented daily-bars |
 | T-06 (#237) | Implement adapter daily-bars endpoint | Done | — | — | Covered by T-05 PR |
 | T-23 (#238) | Create steel API client + Pinia store | Done | web#41 merged | codex-exec/gpt-5.4 | |
-| T-02 (#240) | Write sqlc queries for steel tables | **In Review** | go#33 | codex-exec/gpt-5.4 | Rerouted x3, succeeded on attempt 4. CI passed. |
-| T-09 (#242) | MarketDataProvider interface + HTTP client | **In Review** | go#34 | codex-exec/gpt-5.4 | Rerouted x3, succeeded on attempt 4. CI passed. |
-| T-07 (#241) | Implement adapter news endpoint | **To-Do** | — | — | Rerouted after agent restart killed Codex mid-run. Waiting for pickup. |
+| T-02 (#240) | Write sqlc queries for steel tables | Done | go#33 merged | codex-exec/gpt-5.4 | Rerouted x3, succeeded attempt 4. Merged 2026-03-14. |
+| T-09 (#242) | MarketDataProvider interface + HTTP client | Done | go#34 merged | codex-exec/gpt-5.4 | Rerouted x3, succeeded attempt 4. Merged 2026-03-14. |
+| T-07 (#241) | Implement adapter news endpoint | **To-Do** | — | — | Description restored. Waiting for agent pickup. |
 
 ## Wave 3 — Store Layer + Vue Components (GATED)
 
@@ -115,8 +115,8 @@
 
 ## Action Items
 
-- [ ] **Review and merge go#33 (T-02) and go#34 (T-09)** — both CI passed, wave-2 completion depends on these
-- [ ] Monitor T-07 (#241) — waiting for agent pickup (rerouted after restart)
+- [x] ~~Review and merge go#33 (T-02) and go#34 (T-09)~~ — merged 2026-03-14
+- [ ] Monitor T-07 (#241) — description restored, waiting for agent pickup
 - [ ] Set missing priorities on T-28 (#253), T-14 (#262), T-31 (#263), T-35 (#264) (currently 0)
 - [ ] Bump T-15 (#265) to priority 4 (wiring = founder task)
 - [ ] Bump T-34 (#266) to priority 5 (CI = founder, needs workflow PAT)
