@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.axinova.fleet-worker-9</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/agent01/workspace/axinova-agent-fleet/scripts/fleet-worker-wrapper.sh</string>
+        <string>builder-9</string>
+        <string>/Users/agent01/workspace</string>
+    </array>
+    <key>UserName</key>
+    <string>agent01</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/agent01/workspace/axinova-fleet-go</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/agent01</string>
+        <key>APP_VIKUNJA__URL</key>
+        <string>http://localhost:3456</string>
+        <key>APP_REDIS__ADDR</key>
+        <string>localhost:6379</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>/Users/agent01/logs/fleet-worker-9-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/agent01/logs/fleet-worker-9-stderr.log</string>
+</dict>
+</plist>
